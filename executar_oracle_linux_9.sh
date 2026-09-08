@@ -1082,6 +1082,25 @@ else
     log_info "Serviço PostgreSQL já está ativo e em execução."
 fi
 
+# Verificação e Liberação de Firewall (Oracle Linux 9 / firewalld / iptables)
+if command -v firewall-cmd &>/dev/null && (systemctl is-active --quiet firewalld 2>/dev/null || firewall-cmd --state &>/dev/null); then
+    log_info "Verificando regras de firewall para o PostgreSQL (porta ${DB_PORT}/tcp)..."
+    if firewall-cmd --query-port="${DB_PORT}/tcp" &>/dev/null; then
+        log_info "Porta ${DB_PORT}/tcp já liberada no firewalld."
+    else
+        log_info "Liberando tráfego para a porta ${DB_PORT}/tcp no firewalld..."
+        if firewall-cmd --permanent --add-port="${DB_PORT}/tcp" &>/dev/null && firewall-cmd --reload &>/dev/null; then
+            log_success "Porta ${DB_PORT}/tcp liberada com sucesso no firewalld."
+        fi
+    fi
+fi
+if command -v iptables &>/dev/null && iptables -S INPUT 2>/dev/null | grep -qE "(DROP|REJECT)"; then
+    if ! iptables -C INPUT -p tcp --dport "${DB_PORT}" -j ACCEPT &>/dev/null; then
+        log_info "Liberando porta ${DB_PORT}/tcp nas regras do iptables..."
+        iptables -I INPUT 1 -p tcp --dport "${DB_PORT}" -j ACCEPT &>/dev/null || true
+    fi
+fi
+
 # Localiza psql
 PSQL_BIN="psql"
 if command -v /usr/pgsql-16/bin/psql &>/dev/null; then
@@ -1248,4 +1267,6 @@ log_title "PROCESSO FINALIZADO COM SUCESSO!"
 echo -e "Tempo total decorrido: ${BOLD}${HOURS}h ${MINUTES}m ${SECONDS}s${NC}"
 echo -e "Arquivo de log: ${BOLD}${LOG_FILE}${NC}"
 echo -e "\nPara consultar via terminal:"
-echo -e "  ${CYAN}sudo -u postgres psql -d ${DB_NAME}${NC}\n"
+echo -e "  ${CYAN}sudo -u postgres psql -d ${DB_NAME}${NC}"
+echo -e "\nPara iniciar a Interface Web (Shadcn UI Minimalista):"
+echo -e "  ${CYAN}./iniciar_web.sh${NC}\n"
