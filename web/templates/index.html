@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CNPJ Explorer - Dados Públicos da Receita Federal</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Scrollbar discreta padrão Shadcn */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f4f4f5; }
+        ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+    </style>
+</head>
+<body class="min-h-full bg-zinc-50/60 text-zinc-900 antialiased flex flex-col">
+
+    <!-- Navbar Minimalista Estilo Shadcn -->
+    <header class="sticky top-0 z-40 w-full border-b border-zinc-200 bg-white/95 backdrop-blur">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="h-8 w-8 rounded-md bg-zinc-900 flex items-center justify-center text-white shadow-sm">
+                    <i data-lucide="building-2" class="w-4 h-4"></i>
+                </div>
+                <div>
+                    <span class="font-semibold text-sm tracking-tight text-zinc-900">CNPJ Explorer</span>
+                    <span class="hidden sm:inline-block ml-2 px-2 py-0.5 text-[11px] font-medium bg-zinc-100 text-zinc-600 rounded-md border border-zinc-200">
+                        Receita Federal do Brasil
+                    </span>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <!-- Status do Banco de Dados -->
+                <div id="db-status-badge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span id="db-status-text">PostgreSQL Conectado</span>
+                </div>
+
+                <a href="{{ url_for('logout') }}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-zinc-200 bg-white hover:bg-zinc-100 text-xs font-medium text-zinc-700 transition-colors shadow-sm">
+                    <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+                    <span>Sair</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Conteúdo Principal -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        <!-- Painel de Filtros (Card Shadcn UI) -->
+        <div class="bg-white border border-zinc-200 rounded-xl shadow-sm p-5 space-y-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="filter" class="w-4 h-4 text-zinc-500"></i>
+                    <h2 class="text-sm font-semibold text-zinc-900">Filtros de Pesquisa</h2>
+                    <span class="text-xs text-zinc-400">&bull; Combine qualquer parâmetro</span>
+                </div>
+
+                <button id="btn-toggle-advanced" type="button" class="text-xs font-medium text-zinc-500 hover:text-zinc-900 flex items-center gap-1 transition-colors">
+                    <span id="advanced-toggle-text">Filtros Avançados</span>
+                    <i data-lucide="chevron-down" id="advanced-chevron" class="w-3.5 h-3.5 transition-transform"></i>
+                </button>
+            </div>
+
+            <form id="filter-form" class="space-y-4">
+                <!-- Linha 1: Campos Primários -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div class="space-y-1">
+                        <label class="text-xs font-medium text-zinc-700">CNPJ (Básico ou Completo)</label>
+                        <input type="text" id="f-cnpj" placeholder="Ex: 00.000.000/0001-00" class="h-9 w-full rounded-md border border-zinc-200 bg-transparent px-3 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950 font-mono">
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-xs font-medium text-zinc-700">Razão Social</label>
+                        <input type="text" id="f-razao" placeholder="Nome empresarial parcial" class="h-9 w-full rounded-md border border-zinc-200 bg-transparent px-3 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-xs font-medium text-zinc-700">Nome Fantasia</label>
+                        <input type="text" id="f-fantasia" placeholder="Nome fantasia" class="h-9 w-full rounded-md border border-zinc-200 bg-transparent px-3 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-xs font-medium text-zinc-700">Situação Cadastral</label>
+                        <select id="f-situacao" class="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                            <option value="TODOS">Todas as situações</option>
+                            <option value="2" selected>Ativa (02)</option>
+                            <option value="8">Baixada (08)</option>
+                            <option value="4">Inapta (04)</option>
+                            <option value="3">Suspensa (03)</option>
+                            <option value="1">Nula (01)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Linha 2: Localização e Atividade -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div class="space-y-1">
+                        <label class="text-xs font-medium text-zinc-700">UF (Estado)</label>
+                        <select id="f-uf" class="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                            <option value="TODOS">Todos os estados</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-xs font-medium text-zinc-700">Município</label>
+                        <input type="text" id="f-municipio" placeholder="Nome da cidade ou código" class="h-9 w-full rounded-md border border-zinc-200 bg-transparent px-3 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-xs font-medium text-zinc-700">CNAE Principal</label>
+                        <input type="text" id="f-cnae" placeholder="Ex: 6201500 ou desenvolvimento" class="h-9 w-full rounded-md border border-zinc-200 bg-transparent px-3 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-xs font-medium text-zinc-700">Tipo de Estabelecimento</label>
+                        <select id="f-matriz-filial" class="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                            <option value="TODOS">Matriz e Filiais</option>
+                            <option value="1">Apenas Matriz</option>
+                            <option value="2">Apenas Filiais</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Linha 3: Filtros Avançados (Colapsável) -->
+                <div id="advanced-filters" class="hidden pt-3 border-t border-zinc-100 space-y-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-zinc-700">Porte da Empresa</label>
+                            <select id="f-porte" class="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                                <option value="TODOS">Todos os portes</option>
+                                <option value="2">Microempresa (ME)</option>
+                                <option value="3">Empresa de Pequeno Porte (EPP)</option>
+                                <option value="5">Demais</option>
+                                <option value="1">Não Informado</option>
+                            </select>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-zinc-700">Natureza Jurídica</label>
+                            <select id="f-natju" class="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                                <option value="TODOS">Todas as naturezas</option>
+                            </select>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-zinc-700">Optante Simples Nacional</label>
+                            <select id="f-simples" class="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                                <option value="TODOS">Todos</option>
+                                <option value="S">Sim (Optante)</option>
+                                <option value="N">Não</option>
+                            </select>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-zinc-700">Optante MEI</label>
+                            <select id="f-mei" class="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                                <option value="TODOS">Todos</option>
+                                <option value="S">Sim (MEI)</option>
+                                <option value="N">Não</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-zinc-700">Capital Social Mínimo (R$)</label>
+                            <input type="number" id="f-cap-min" placeholder="0" class="h-9 w-full rounded-md border border-zinc-200 bg-transparent px-3 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-zinc-700">Capital Social Máximo (R$)</label>
+                            <input type="number" id="f-cap-max" placeholder="Sem limite" class="h-9 w-full rounded-md border border-zinc-200 bg-transparent px-3 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-zinc-700">Início de Atividade (A partir de)</label>
+                            <input type="date" id="f-dt-ini" class="h-9 w-full rounded-md border border-zinc-200 bg-transparent px-3 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-zinc-700">Início de Atividade (Até)</label>
+                            <input type="date" id="f-dt-fim" class="h-9 w-full rounded-md border border-zinc-200 bg-transparent px-3 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Botões de Ação -->
+                <div class="flex flex-wrap items-center justify-between gap-3 pt-2">
+                    <div class="flex items-center gap-2">
+                        <button type="submit" class="h-9 px-4 bg-zinc-900 hover:bg-zinc-800 text-white rounded-md text-xs font-medium transition-colors shadow-sm flex items-center gap-2">
+                            <i data-lucide="search" class="w-3.5 h-3.5"></i>
+                            <span>Consultar Empresas</span>
+                        </button>
+                        <button type="button" id="btn-limpar" class="h-9 px-3.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 rounded-md text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5">
+                            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 text-zinc-500"></i>
+                            <span>Limpar</span>
+                        </button>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="btn-exportar" class="h-9 px-3.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 rounded-md text-xs font-medium transition-colors shadow-sm flex items-center gap-2">
+                            <i data-lucide="download" class="w-3.5 h-3.5 text-zinc-500"></i>
+                            <span>Exportar CSV</span>
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- Tabela de Resultados (Card Shadcn UI) -->
+        <div class="bg-white border border-zinc-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
+            <!-- Header da Tabela -->
+            <div class="px-5 py-4 border-b border-zinc-200 flex flex-wrap items-center justify-between gap-3 bg-white">
+                <div>
+                    <h3 class="text-sm font-semibold text-zinc-900">Resultados da Consulta</h3>
+                    <p id="total-count-text" class="text-xs text-zinc-500 mt-0.5">Carregando dados...</p>
+                </div>
+
+                <!-- Seletor de Registros por Página -->
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-zinc-500">Linhas por página:</span>
+                    <select id="page-size" class="h-8 rounded-md border border-zinc-200 bg-white px-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                        <option value="10">10</option>
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Tabela com Scroll Horizontal Responsivo -->
+            <div class="overflow-x-auto min-h-[300px] relative">
+                <!-- Loading Overlay -->
+                <div id="loading-spinner" class="hidden absolute inset-0 bg-white/75 backdrop-blur-[1px] z-10 flex items-center justify-center">
+                    <div class="flex flex-col items-center gap-2">
+                        <div class="w-6 h-6 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin"></div>
+                        <span class="text-xs font-medium text-zinc-600">Consultando PostgreSQL...</span>
+                    </div>
+                </div>
+
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-zinc-200 bg-zinc-50/50 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                            <th class="py-3 px-4">CNPJ</th>
+                            <th class="py-3 px-4">Razão Social / Nome Fantasia</th>
+                            <th class="py-3 px-4">Tipo</th>
+                            <th class="py-3 px-4">Situação</th>
+                            <th class="py-3 px-4">Localização</th>
+                            <th class="py-3 px-4">CNAE Principal</th>
+                            <th class="py-3 px-4">Porte</th>
+                            <th class="py-3 px-4 text-right">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body" class="divide-y divide-zinc-100 text-xs text-zinc-700">
+                        <!-- Linhas injetadas via JavaScript -->
+                    </tbody>
+                </table>
+
+                <!-- Estado Vazio -->
+                <div id="empty-state" class="hidden py-16 flex flex-col items-center justify-center text-center p-4">
+                    <div class="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-400 mb-3">
+                        <i data-lucide="search-x" class="w-5 h-5"></i>
+                    </div>
+                    <h4 class="text-sm font-medium text-zinc-900">Nenhuma empresa localizada</h4>
+                    <p class="text-xs text-zinc-500 mt-1 max-w-sm">Tente ajustar ou limpar os filtros de pesquisa para visualizar resultados.</p>
+                </div>
+            </div>
+
+            <!-- Barra de Paginação Estilo Shadcn -->
+            <div class="px-5 py-3 border-t border-zinc-200 bg-zinc-50/30 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
+                <div id="pagination-info">
+                    Página <span id="current-page-num" class="font-medium text-zinc-900">1</span> de <span id="total-pages-num" class="font-medium text-zinc-900">1</span>
+                </div>
+
+                <div class="flex items-center gap-1">
+                    <button id="btn-first" class="h-8 px-2.5 rounded-md border border-zinc-200 bg-white hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm transition-colors" title="Primeira Página">
+                        <i data-lucide="chevrons-left" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button id="btn-prev" class="h-8 px-2.5 rounded-md border border-zinc-200 bg-white hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm transition-colors flex items-center gap-1">
+                        <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i>
+                        <span class="hidden sm:inline">Anterior</span>
+                    </button>
+
+                    <div id="page-buttons" class="flex items-center gap-1 px-1">
+                        <!-- Botões numéricos dinâmicos -->
+                    </div>
+
+                    <button id="btn-next" class="h-8 px-2.5 rounded-md border border-zinc-200 bg-white hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm transition-colors flex items-center gap-1">
+                        <span class="hidden sm:inline">Próxima</span>
+                        <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button id="btn-last" class="h-8 px-2.5 rounded-md border border-zinc-200 bg-white hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm transition-colors" title="Última Página">
+                        <i data-lucide="chevrons-right" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal / Ficha Cadastral da Empresa Estilo Shadcn Dialog -->
+    <div id="company-modal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
+        <div class="relative w-full max-w-4xl bg-white border border-zinc-200 rounded-xl shadow-xl overflow-hidden max-h-[90vh] flex flex-col animate-in fade-in-0 zoom-in-95 duration-150">
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-zinc-200 flex items-center justify-between bg-zinc-50/50">
+                <div class="flex items-center gap-3">
+                    <div class="h-9 w-9 rounded-lg bg-zinc-900 flex items-center justify-center text-white">
+                        <i data-lucide="building" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <h3 id="modal-razao-social" class="text-base font-semibold text-zinc-900 leading-tight">Nome da Empresa</h3>
+                        <p id="modal-cnpj-completo" class="text-xs text-zinc-500 font-mono mt-0.5">00.000.000/0001-00</p>
+                    </div>
+                </div>
+                <button id="btn-close-modal" type="button" class="text-zinc-400 hover:text-zinc-700 p-1 rounded-md hover:bg-zinc-100 transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- Modal Body com Scroll Interno -->
+            <div class="p-6 overflow-y-auto space-y-6 text-xs text-zinc-700">
+                <!-- Seção 1: Informações Gerais -->
+                <div>
+                    <h4 class="text-xs font-semibold text-zinc-900 uppercase tracking-wider mb-3 pb-1 border-b border-zinc-100 flex items-center gap-2">
+                        <i data-lucide="info" class="w-3.5 h-3.5 text-zinc-500"></i>
+                        <span>Dados Cadastrais da Empresa</span>
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-zinc-50/50 p-4 rounded-lg border border-zinc-100">
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Nome Fantasia</span>
+                            <span id="modal-fantasia" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Situação Cadastral</span>
+                            <span id="modal-situacao" class="font-medium">-</span>
+                        </div>
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Data da Situação</span>
+                            <span id="modal-dt-situacao" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Data de Abertura</span>
+                            <span id="modal-dt-inicio" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Porte</span>
+                            <span id="modal-porte" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Capital Social</span>
+                            <span id="modal-capital" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div class="sm:col-span-2">
+                            <span class="text-zinc-400 block text-[11px]">Natureza Jurídica</span>
+                            <span id="modal-natju" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Simples Nacional / MEI</span>
+                            <span id="modal-simples-mei" class="font-medium text-zinc-900">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Seção 2: Atividade Econômica -->
+                <div>
+                    <h4 class="text-xs font-semibold text-zinc-900 uppercase tracking-wider mb-3 pb-1 border-b border-zinc-100 flex items-center gap-2">
+                        <i data-lucide="briefcase" class="w-3.5 h-3.5 text-zinc-500"></i>
+                        <span>Atividades Econômicas (CNAE)</span>
+                    </h4>
+                    <div class="bg-zinc-50/50 p-4 rounded-lg border border-zinc-100 space-y-2">
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Atividade Principal</span>
+                            <span id="modal-cnae-principal" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div id="modal-cnae-sec-container">
+                            <span class="text-zinc-400 block text-[11px]">Atividades Secundárias (Códigos)</span>
+                            <p id="modal-cnae-sec" class="text-zinc-600 font-mono text-[11px] leading-relaxed break-words">-</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Seção 3: Endereço e Contato -->
+                <div>
+                    <h4 class="text-xs font-semibold text-zinc-900 uppercase tracking-wider mb-3 pb-1 border-b border-zinc-100 flex items-center gap-2">
+                        <i data-lucide="map-pin" class="w-3.5 h-3.5 text-zinc-500"></i>
+                        <span>Localização e Contato</span>
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-zinc-50/50 p-4 rounded-lg border border-zinc-100">
+                        <div class="sm:col-span-2">
+                            <span class="text-zinc-400 block text-[11px]">Logradouro</span>
+                            <span id="modal-endereco" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Bairro</span>
+                            <span id="modal-bairro" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Município / UF</span>
+                            <span id="modal-municipio-uf" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">CEP</span>
+                            <span id="modal-cep" class="font-medium text-zinc-900 font-mono">-</span>
+                        </div>
+                        <div>
+                            <span class="text-zinc-400 block text-[11px]">Telefone</span>
+                            <span id="modal-telefone" class="font-medium text-zinc-900">-</span>
+                        </div>
+                        <div class="sm:col-span-3">
+                            <span class="text-zinc-400 block text-[11px]">E-mail</span>
+                            <span id="modal-email" class="font-medium text-zinc-900">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Seção 4: Quadro de Sócios e Administradores (QSA) -->
+                <div>
+                    <h4 class="text-xs font-semibold text-zinc-900 uppercase tracking-wider mb-3 pb-1 border-b border-zinc-100 flex items-center justify-between">
+                        <span class="flex items-center gap-2">
+                            <i data-lucide="users" class="w-3.5 h-3.5 text-zinc-500"></i>
+                            <span>Quadro de Sócios e Administradores (QSA)</span>
+                        </span>
+                        <span id="modal-socios-count" class="text-[11px] font-normal text-zinc-400">0 sócios</span>
+                    </h4>
+                    <div class="border border-zinc-200 rounded-lg overflow-hidden">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-zinc-50 text-[11px] text-zinc-500 font-medium border-b border-zinc-200">
+                                <tr>
+                                    <th class="py-2.5 px-3">Nome / Razão Social</th>
+                                    <th class="py-2.5 px-3">Qualificação</th>
+                                    <th class="py-2.5 px-3">Documento</th>
+                                    <th class="py-2.5 px-3">Entrada</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modal-socios-body" class="divide-y divide-zinc-100">
+                                <!-- Linhas de Sócios -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="px-6 py-3 border-t border-zinc-200 bg-zinc-50 flex items-center justify-end">
+                <button id="btn-close-modal-footer" type="button" class="h-8 px-4 bg-zinc-900 hover:bg-zinc-800 text-white rounded-md text-xs font-medium transition-colors shadow-sm">
+                    Fechar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts da Interface (Vanilla JS) -->
+    <script>
+        let currentPage = 1;
+        let currentTotalPages = 1;
+
+        // Inicializa ícones Lucide
+        lucide.createIcons();
+
+        // Alternador de Filtros Avançados
+        const btnToggleAdvanced = document.getElementById('btn-toggle-advanced');
+        const advancedFilters = document.getElementById('advanced-filters');
+        const advancedChevron = document.getElementById('advanced-chevron');
+        const advancedText = document.getElementById('advanced-toggle-text');
+
+        btnToggleAdvanced.addEventListener('click', () => {
+            const isHidden = advancedFilters.classList.contains('hidden');
+            if (isHidden) {
+                advancedFilters.classList.remove('hidden');
+                advancedChevron.classList.add('rotate-180');
+                advancedText.innerText = 'Ocultar Avançados';
+            } else {
+                advancedFilters.classList.add('hidden');
+                advancedChevron.classList.remove('rotate-180');
+                advancedText.innerText = 'Filtros Avançados';
+            }
+        });
+
+        // Carrega opções de domínios (UFs, Naturezas Jurídicas)
+        async function loadDomains() {
+            try {
+                const res = await fetch('/api/dominios');
+                const data = await res.json();
+
+                // Preenche UF
+                const selectUf = document.getElementById('f-uf');
+                data.ufs.forEach(uf => {
+                    const opt = document.createElement('option');
+                    opt.value = uf;
+                    opt.textContent = uf;
+                    selectUf.appendChild(opt);
+                });
+
+                // Preenche Naturezas Jurídicas
+                const selectNatju = document.getElementById('f-natju');
+                data.naturezas_juridicas.forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item.codigo;
+                    opt.textContent = item.descricao;
+                    selectNatju.appendChild(opt);
+                });
+            } catch (err) {
+                console.error('Erro ao carregar domínios:', err);
+            }
+        }
+
+        // Monta os parâmetros de busca
+        function getFilterParams() {
+            const params = new URLSearchParams();
+            const getVal = id => document.getElementById(id).value.trim();
+
+            const cnpj = getVal('f-cnpj');
+            const razao = getVal('f-razao');
+            const fantasia = getVal('f-fantasia');
+            const situacao = getVal('f-situacao');
+            const uf = getVal('f-uf');
+            const municipio = getVal('f-municipio');
+            const cnae = getVal('f-cnae');
+            const matrizFilial = getVal('f-matriz-filial');
+            const porte = getVal('f-porte');
+            const natju = getVal('f-natju');
+            const simples = getVal('f-simples');
+            const mei = getVal('f-mei');
+            const capMin = getVal('f-cap-min');
+            const capMax = getVal('f-cap-max');
+            const dtIni = getVal('f-dt-ini');
+            const dtFim = getVal('f-dt-fim');
+
+            if (cnpj) params.append('cnpj', cnpj);
+            if (razao) params.append('razao_social', razao);
+            if (fantasia) params.append('nome_fantasia', fantasia);
+            if (situacao && situacao !== 'TODOS') params.append('situacao_cadastral', situacao);
+            if (uf && uf !== 'TODOS') params.append('uf', uf);
+            if (municipio) params.append('municipio', municipio);
+            if (cnae) params.append('cnae', cnae);
+            if (matrizFilial && matrizFilial !== 'TODOS') params.append('matriz_filial', matrizFilial);
+            if (porte && porte !== 'TODOS') params.append('porte_empresa', porte);
+            if (natju && natju !== 'TODOS') params.append('natureza_juridica', natju);
+            if (simples && simples !== 'TODOS') params.append('opcao_simples', simples);
+            if (mei && mei !== 'TODOS') params.append('opcao_mei', mei);
+            if (capMin) params.append('capital_min', capMin);
+            if (capMax) params.append('capital_max', capMax);
+            if (dtIni) params.append('data_inicio_de', dtIni);
+            if (dtFim) params.append('data_inicio_ate', dtFim);
+
+            return params;
+        }
+
+        // Executa busca e renderiza tabela
+        async function fetchEmpresas(page = 1) {
+            currentPage = page;
+            const pageSize = document.getElementById('page-size').value;
+            const params = getFilterParams();
+            params.append('page', page);
+            params.append('page_size', pageSize);
+
+            const spinner = document.getElementById('loading-spinner');
+            const tbody = document.getElementById('table-body');
+            const emptyState = document.getElementById('empty-state');
+            const totalText = document.getElementById('total-count-text');
+
+            spinner.classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/empresas?${params.toString()}`);
+                const data = await res.json();
+
+                tbody.innerHTML = '';
+
+                if (!data.results || data.results.length === 0) {
+                    emptyState.classList.remove('hidden');
+                    totalText.innerText = '0 empresas encontradas';
+                    updatePagination(1, 1, 0);
+                    return;
+                }
+
+                emptyState.classList.add('hidden');
+                currentTotalPages = data.total_pages;
+
+                const countLabel = data.is_capped ? 'mais de 10.000' : data.total_records.toLocaleString('pt-BR');
+                totalText.innerText = `${countLabel} empresas encontradas`;
+
+                data.results.forEach(emp => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-zinc-50/70 transition-colors cursor-pointer';
+
+                    // Badge de situação
+                    let situacaoBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-zinc-100 text-zinc-700 border border-zinc-200">${emp.situacao_cadastral}</span>`;
+                    if (emp.situacao_cod === 2) {
+                        situacaoBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">Ativa</span>`;
+                    } else if (emp.situacao_cod === 8 || emp.situacao_cod === 4) {
+                        situacaoBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-700 border border-red-200">${emp.situacao_cadastral}</span>`;
+                    } else if (emp.situacao_cod === 3) {
+                        situacaoBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200">Suspensa</span>`;
+                    }
+
+                    // Badge Matriz/Filial
+                    const tipoBadge = emp.tipo === 'Matriz'
+                        ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-900 text-white">Matriz</span>`
+                        : `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-100 text-zinc-600 border border-zinc-200">Filial</span>`;
+
+                    tr.innerHTML = `
+                        <td class="py-3 px-4 font-mono font-medium text-zinc-900 whitespace-nowrap">${emp.cnpj}</td>
+                        <td class="py-3 px-4 max-w-[280px]">
+                            <div class="font-medium text-zinc-900 truncate" title="${emp.razao_social}">${emp.razao_social}</div>
+                            <div class="text-zinc-400 text-[11px] truncate">${emp.nome_fantasia || '-'}</div>
+                        </td>
+                        <td class="py-3 px-4 whitespace-nowrap">${tipoBadge}</td>
+                        <td class="py-3 px-4 whitespace-nowrap">${situacaoBadge}</td>
+                        <td class="py-3 px-4 whitespace-nowrap">
+                            <span class="text-zinc-700">${emp.municipio}</span>
+                            <span class="text-zinc-400 text-[11px] ml-1">/ ${emp.uf}</span>
+                        </td>
+                        <td class="py-3 px-4 max-w-[200px]">
+                            <div class="text-zinc-900 font-mono text-[11px]">${emp.cnae_codigo}</div>
+                            <div class="text-zinc-400 text-[11px] truncate" title="${emp.cnae_descricao}">${emp.cnae_descricao || '-'}</div>
+                        </td>
+                        <td class="py-3 px-4 whitespace-nowrap">
+                            <span class="text-zinc-600 text-[11px]">${emp.porte}</span>
+                        </td>
+                        <td class="py-3 px-4 text-right whitespace-nowrap">
+                            <button onclick="openCompanyModal('${emp.cnpj_basico}')" class="inline-flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 bg-white hover:bg-zinc-100 text-zinc-700 text-xs transition-colors shadow-sm">
+                                <i data-lucide="eye" class="w-3.5 h-3.5 text-zinc-500"></i>
+                                <span>Ver Ficha</span>
+                            </button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                lucide.createIcons();
+                updatePagination(data.page, data.total_pages, data.total_records);
+            } catch (err) {
+                console.error('Erro na consulta:', err);
+                totalText.innerText = 'Erro ao consultar o banco de dados';
+            } finally {
+                spinner.classList.add('hidden');
+            }
+        }
+
+        // Atualiza controles de paginação
+        function updatePagination(page, totalPages, totalRecords) {
+            document.getElementById('current-page-num').innerText = page;
+            document.getElementById('total-pages-num').innerText = totalPages;
+
+            document.getElementById('btn-first').disabled = page <= 1;
+            document.getElementById('btn-prev').disabled = page <= 1;
+            document.getElementById('btn-next').disabled = page >= totalPages;
+            document.getElementById('btn-last').disabled = page >= totalPages;
+
+            // Renderiza botões de páginas numéricas (máx 5)
+            const btnContainer = document.getElementById('page-buttons');
+            btnContainer.innerHTML = '';
+
+            let start = Math.max(1, page - 2);
+            let end = Math.min(totalPages, start + 4);
+            if (end - start < 4) start = Math.max(1, end - 4);
+
+            for (let i = start; i <= end; i++) {
+                const b = document.createElement('button');
+                b.className = `h-8 w-8 rounded-md text-xs font-medium transition-colors ${
+                    i === page
+                        ? 'bg-zinc-900 text-white shadow-sm'
+                        : 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100 shadow-sm'
+                }`;
+                b.innerText = i;
+                b.onclick = () => fetchEmpresas(i);
+                btnContainer.appendChild(b);
+            }
+        }
+
+        // Modal de Ficha Cadastral da Empresa
+        async function openCompanyModal(cnpjBasico) {
+            const modal = document.getElementById('company-modal');
+            modal.classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/empresa/${cnpjBasico}`);
+                if (!res.ok) throw new Error('Não encontrado');
+                const data = await res.json();
+
+                document.getElementById('modal-razao-social').innerText = data.razao_social;
+                document.getElementById('modal-cnpj-completo').innerText = data.cnpj_completo;
+                document.getElementById('modal-fantasia').innerText = data.nome_fantasia || '-';
+                document.getElementById('modal-situacao').innerText = `${data.situacao_cadastral}`;
+                document.getElementById('modal-dt-situacao').innerText = data.data_situacao || '-';
+                document.getElementById('modal-dt-inicio').innerText = data.data_inicio || '-';
+                document.getElementById('modal-porte').innerText = data.porte;
+                document.getElementById('modal-capital').innerText = data.capital_social;
+                document.getElementById('modal-natju').innerText = data.natureza_juridica;
+                document.getElementById('modal-simples-mei').innerText = `Simples: ${data.simples_optante} | MEI: ${data.mei_optante}`;
+                document.getElementById('modal-cnae-principal').innerText = data.cnae_principal;
+                document.getElementById('modal-cnae-sec').innerText = data.cnae_secundario || 'Nenhum informado';
+                document.getElementById('modal-endereco').innerText = data.endereco || '-';
+                document.getElementById('modal-bairro').innerText = data.bairro || '-';
+                document.getElementById('modal-municipio-uf').innerText = `${data.municipio} / ${data.uf}`;
+                document.getElementById('modal-cep').innerText = data.cep || '-';
+                document.getElementById('modal-telefone').innerText = data.telefone || '-';
+                document.getElementById('modal-email').innerText = data.email || '-';
+
+                // Preenche Sócios
+                const sociosBody = document.getElementById('modal-socios-body');
+                sociosBody.innerHTML = '';
+                document.getElementById('modal-socios-count').innerText = `${data.socios.length} sócios cadastrados`;
+
+                if (data.socios.length === 0) {
+                    sociosBody.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-zinc-400">Nenhum sócio informado no QSA.</td></tr>`;
+                } else {
+                    data.socios.forEach(s => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td class="py-2.5 px-3 font-medium text-zinc-900">${s.nome}</td>
+                            <td class="py-2.5 px-3 text-zinc-600">${s.qualificacao}</td>
+                            <td class="py-2.5 px-3 text-zinc-400 font-mono text-[11px]">${s.documento || '-'}</td>
+                            <td class="py-2.5 px-3 text-zinc-500">${s.data_entrada || '-'}</td>
+                        `;
+                        sociosBody.appendChild(tr);
+                    });
+                }
+            } catch (err) {
+                console.error('Erro ao abrir ficha cadastral:', err);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('company-modal').classList.add('hidden');
+        }
+
+        document.getElementById('btn-close-modal').addEventListener('click', closeModal);
+        document.getElementById('btn-close-modal-footer').addEventListener('click', closeModal);
+
+        // Exportação para CSV
+        document.getElementById('btn-exportar').addEventListener('click', () => {
+            const params = getFilterParams();
+            const url = `/api/exportar-csv?${params.toString()}`;
+            window.location.href = url;
+        });
+
+        // Eventos do Formulário
+        document.getElementById('filter-form').addEventListener('submit', e => {
+            e.preventDefault();
+            fetchEmpresas(1);
+        });
+
+        document.getElementById('btn-limpar').addEventListener('click', () => {
+            document.getElementById('filter-form').reset();
+            fetchEmpresas(1);
+        });
+
+        document.getElementById('page-size').addEventListener('change', () => fetchEmpresas(1));
+
+        // Paginação
+        document.getElementById('btn-first').addEventListener('click', () => fetchEmpresas(1));
+        document.getElementById('btn-prev').addEventListener('click', () => {
+            if (currentPage > 1) fetchEmpresas(currentPage - 1);
+        });
+        document.getElementById('btn-next').addEventListener('click', () => {
+            if (currentPage < currentTotalPages) fetchEmpresas(currentPage + 1);
+        });
+        document.getElementById('btn-last').addEventListener('click', () => fetchEmpresas(currentTotalPages));
+
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDomains();
+            fetchEmpresas(1);
+        });
+    </script>
+</body>
+</html>

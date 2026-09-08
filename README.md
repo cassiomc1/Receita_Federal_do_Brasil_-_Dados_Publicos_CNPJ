@@ -59,6 +59,51 @@ sudo ./executar_oracle_linux_9.sh --reset
 
 ---------------------
 
+### Interface Web (Shadcn UI Minimalista):
+
+O repositório inclui uma interface web moderna, rápida e minimalista baseada nos princípios de design do [Shadcn UI](https://ui.shadcn.com/) (tema claro, tipografia Inter, bordas sutis e componentes modulares).
+
+#### Recursos:
+- **Autenticação Volátil por Sessão:** A cada inicialização do servidor, um novo par de usuário/senha temporário é gerado aleatoriamente e impresso no terminal. Sessões antigas são invalidadas automaticamente para máxima segurança.
+- **Filtros Completos de Consulta:**
+  - Identificação: CNPJ (básico ou completo com máscara), Razão Social, Nome Fantasia.
+  - Localização: UF e Município (com busca em memória de todos os municípios do Brasil).
+  - Situação & Tipo: Situação Cadastral (Ativa, Baixada, Suspensa, Inapta, Nula), Matriz ou Filial.
+  - Atividade & Porte: CNAE Principal, Natureza Jurídica, Porte da Empresa (ME, EPP, Demais).
+  - Regimes Especiais: Optante pelo Simples Nacional (Sim/Não), Optante pelo MEI (Sim/Não).
+  - Financeiro & Datas: Faixa de Capital Social (Mínimo / Máximo) e Data de Início de Atividade.
+- **Paginação Server-Side:** Paginação otimizada com seletor de itens por página (10, 25, 50, 100) e cálculo total de registros e páginas.
+- **Detalhes da Empresa:** Modal completo com abas detalhando Matriz, Endereço e Contato, Enquadramento Tributário, Quadro de Sócios e Administradores (QSA) e Filiais cadastradas.
+- **Exportação para CSV:** Exportação em streaming dos resultados filtrados com delimitador `;` e codificação UTF-8 com BOM (compatível diretamente com o Microsoft Excel e LibreOffice).
+
+#### Como Iniciar:
+
+```bash
+# Permissão de execução (se necessário)
+chmod +x iniciar_web.sh
+
+# Iniciar na porta padrão (5000)
+./iniciar_web.sh
+
+# Ou especificar porta e host:
+./iniciar_web.sh --port 8080 --host 0.0.0.0
+```
+
+Ao iniciar, as credenciais de acesso serão exibidas no terminal:
+```text
+======================================================================
+  CNPJ Explorer - Interface Web (Shadcn UI Minimalista)
+======================================================================
+  URL de acesso:  http://localhost:5000
+  Usuário:        admin
+  Senha temporária: rfb-a1b2c3d4e5f6
+======================================================================
+  [!] As credenciais são voláteis e renovadas a cada inicialização.
+======================================================================
+```
+
+---------------------
+
 ### Como utilizar manualmente (Outros sistemas / Passo a passo):
 
 1. **Instalar dependências:**
