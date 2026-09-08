@@ -201,9 +201,13 @@
                     </div>
 
                     <div class="flex items-center gap-2">
-                        <button type="button" id="btn-exportar" class="h-9 px-3.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 rounded-md text-xs font-medium transition-colors shadow-sm flex items-center gap-2">
-                            <i data-lucide="download" class="w-3.5 h-3.5 text-zinc-500"></i>
+                        <button type="button" id="btn-exportar" class="h-9 px-3.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 rounded-md text-xs font-medium transition-colors shadow-sm flex items-center gap-2" title="Exportar dados filtrados para CSV">
+                            <i data-lucide="file-text" class="w-3.5 h-3.5 text-zinc-500"></i>
                             <span>Exportar CSV</span>
+                        </button>
+                        <button type="button" id="btn-exportar-xls" class="h-9 px-3.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 rounded-md text-xs font-medium transition-colors shadow-sm flex items-center gap-2" title="Exportar dados filtrados diretamente para planilha Excel (XLS/XLSX)">
+                            <i data-lucide="file-spreadsheet" class="w-3.5 h-3.5 text-emerald-600"></i>
+                            <span>Exportar XLS</span>
                         </button>
                     </div>
                 </div>
@@ -732,11 +736,56 @@
         document.getElementById('btn-close-modal-footer').addEventListener('click', closeModal);
 
         // Exportação para CSV
-        document.getElementById('btn-exportar').addEventListener('click', () => {
-            const params = getFilterParams();
-            const url = `/api/exportar-csv?${params.toString()}`;
-            window.location.href = url;
-        });
+        const btnExportarCsv = document.getElementById('btn-exportar');
+        if (btnExportarCsv) {
+            btnExportarCsv.addEventListener('click', () => {
+                const params = getFilterParams();
+                const originalHtml = btnExportarCsv.innerHTML;
+                btnExportarCsv.disabled = true;
+                btnExportarCsv.classList.add('opacity-75', 'cursor-not-allowed');
+                btnExportarCsv.innerHTML = `
+                    <svg class="animate-spin -ml-0.5 mr-1.5 h-3.5 w-3.5 text-zinc-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                    </svg>
+                    <span>Exportando...</span>
+                `;
+                const url = `/api/exportar-csv?${params.toString()}`;
+                window.location.href = url;
+                setTimeout(() => {
+                    btnExportarCsv.disabled = false;
+                    btnExportarCsv.classList.remove('opacity-75', 'cursor-not-allowed');
+                    btnExportarCsv.innerHTML = originalHtml;
+                    lucide.createIcons();
+                }, 2500);
+            });
+        }
+
+        // Exportação para XLS (Excel)
+        const btnExportarXls = document.getElementById('btn-exportar-xls');
+        if (btnExportarXls) {
+            btnExportarXls.addEventListener('click', () => {
+                const params = getFilterParams();
+                const originalHtml = btnExportarXls.innerHTML;
+                btnExportarXls.disabled = true;
+                btnExportarXls.classList.add('opacity-75', 'cursor-not-allowed');
+                btnExportarXls.innerHTML = `
+                    <svg class="animate-spin -ml-0.5 mr-1.5 h-3.5 w-3.5 text-emerald-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                    </svg>
+                    <span>Exportando XLS...</span>
+                `;
+                const url = `/api/exportar-xls?${params.toString()}`;
+                window.location.href = url;
+                setTimeout(() => {
+                    btnExportarXls.disabled = false;
+                    btnExportarXls.classList.remove('opacity-75', 'cursor-not-allowed');
+                    btnExportarXls.innerHTML = originalHtml;
+                    lucide.createIcons();
+                }, 3500);
+            });
+        }
 
         // Eventos do Formulário
         document.getElementById('filter-form').addEventListener('submit', e => {

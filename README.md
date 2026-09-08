@@ -84,7 +84,7 @@ O repositório inclui uma interface web moderna, rápida e minimalista baseada n
   - Financeiro & Datas: Faixa de Capital Social (Mínimo / Máximo) e Data de Início de Atividade.
 - **Paginação Server-Side:** Paginação otimizada com seletor de itens por página (10, 25, 50, 100) e cálculo total de registros e páginas.
 - **Detalhes da Empresa:** Modal completo com abas detalhando Matriz, Endereço e Contato, Enquadramento Tributário, Quadro de Sócios e Administradores (QSA) e Filiais cadastradas.
-- **Exportação para CSV:** Exportação em streaming dos resultados filtrados com delimitador `;` e codificação UTF-8 com BOM (compatível diretamente com o Microsoft Excel e LibreOffice).
+- **Exportação para CSV e XLS (Excel):** Exportação direta dos resultados filtrados para planilha Excel (.xlsx / .xls) com estilização de cabeçalho, larguras de colunas ajustadas e preservação de formatação de CNPJs e códigos, além de exportação em streaming CSV delimitado por `;` com codificação UTF-8 BOM.
 - **Liberação Automática de Firewall (Oracle Linux 9 / RHEL / OCI):** O script verifica se o `firewalld` ou `iptables` está ativo no servidor e adiciona automaticamente a porta utilizada nas regras para liberar o tráfego externo de forma permanente.
 
 #### Como Iniciar:

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Aplicação Web Principal do Painel de Consulta aos Dados Públicos de CNPJ.
-Construído com Flask, visual inspirado no Shadcn UI (tema claro, minimalista),
-autenticação com senha gerada a cada inicialização, consultas avançadas e exportação CSV.
+Aplicação Web Flask - Consulta aos Dados Públicos do CNPJ (RFB).
+Interface moderna baseada no Shadcn UI com tema claro, tipografia Inter,
+autenticação com senha gerada a cada inicialização, consultas avançadas e exportação CSV / XLS (Excel).
 """
 
 import argparse
@@ -32,6 +32,7 @@ try:
         search_empresas,
         get_empresa_details,
         generate_csv_stream,
+        generate_excel_file,
         LISTA_UFS,
         MAPA_SITUACAO,
         MAPA_PORTE,
@@ -59,6 +60,7 @@ except ImportError:
         search_empresas,
         get_empresa_details,
         generate_csv_stream,
+        generate_excel_file,
         LISTA_UFS,
         MAPA_SITUACAO,
         MAPA_PORTE,
@@ -184,6 +186,54 @@ def api_exportar_csv():
     return Response(
         generate_csv_stream(filters, max_rows=10000),
         mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-cache",
+        },
+    )
+
+@app.route("/api/exportar-xls", methods=["GET"])
+@app.route("/api/exportar-xlsx", methods=["GET"])
+@app.route("/api/exportar-excel", methods=["GET"])
+@login_required
+def api_exportar_xls():
+    """Exporta a listagem atual filtrada diretamente em planilha Excel (XLS/XLSX) para download."""
+    filters = {
+        "cnpj": request.args.get("cnpj", ""),
+        "razao_social": request.args.get("razao_social", ""),
+        "nome_fantasia": request.args.get("nome_fantasia", ""),
+        "uf": request.args.get("uf", ""),
+        "municipio": request.args.get("municipio", ""),
+        "situacao_cadastral": request.args.get("situacao_cadastral", ""),
+        "matriz_filial": request.args.get("matriz_filial", ""),
+        "porte_empresa": request.args.get("porte_empresa", ""),
+        "cnae": request.args.get("cnae", ""),
+        "natureza_juridica": request.args.get("natureza_juridica", ""),
+        "opcao_simples": request.args.get("opcao_simples", ""),
+        "opcao_mei": request.args.get("opcao_mei", ""),
+        "capital_min": request.args.get("capital_min", ""),
+        "capital_max": request.args.get("capital_max", ""),
+        "data_inicio_de": request.args.get("data_inicio_de", ""),
+        "data_inicio_ate": request.args.get("data_inicio_ate", ""),
+    }
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ext = request.args.get("ext", "xlsx").lower()
+    if ext not in ("xlsx", "xls"):
+        ext = "xlsx"
+    filename = f"empresas_rfb_export_{timestamp}.{ext}"
+
+    excel_io = generate_excel_file(filters, max_rows=10000)
+
+    mimetype = (
+        "application/vnd.ms-excel"
+        if ext == "xls"
+        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    return Response(
+        excel_io.getvalue(),
+        mimetype=mimetype,
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "no-cache",

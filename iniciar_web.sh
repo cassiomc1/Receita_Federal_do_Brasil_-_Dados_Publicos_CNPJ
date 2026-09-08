@@ -152,21 +152,21 @@ if ! $PYTHON_EXEC -c "import flask" &>/dev/null; then
         if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
             "${SCRIPT_DIR}/venv/bin/pip" install -r "${SCRIPT_DIR}/requirements.txt" --quiet && INSTALLED=true || true
         else
-            "${SCRIPT_DIR}/venv/bin/pip" install flask psycopg2-binary SQLAlchemy python-dotenv --quiet && INSTALLED=true || true
+            "${SCRIPT_DIR}/venv/bin/pip" install flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet && INSTALLED=true || true
         fi
     fi
 
     # 2. Se pip estiver no PATH (venv ativo ou sistema)
     if [ "$INSTALLED" = false ]; then
         if command -v pip &>/dev/null; then
-            pip install flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || \
-            pip install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || true
+            pip install flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || \
+            pip install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || true
         elif command -v pip3 &>/dev/null; then
-            pip3 install flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || \
-            pip3 install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || true
+            pip3 install flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || \
+            pip3 install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || true
         else
-            $PYTHON_EXEC -m pip install flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || \
-            $PYTHON_EXEC -m pip install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || true
+            $PYTHON_EXEC -m pip install flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || \
+            $PYTHON_EXEC -m pip install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || true
         fi
     fi
 

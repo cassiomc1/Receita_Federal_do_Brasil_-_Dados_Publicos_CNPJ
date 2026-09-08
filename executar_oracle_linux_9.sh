@@ -1467,7 +1467,7 @@ else
 fi
 
 DEPENDENCIES_READY=false
-if "$VENV_DIR/bin/python" -c "import pandas, psycopg2, sqlalchemy, requests, dotenv, tqdm, flask" &>/dev/null; then
+if "$VENV_DIR/bin/python" -c "import pandas, psycopg2, sqlalchemy, requests, dotenv, tqdm, flask, openpyxl" &>/dev/null; then
     DEPENDENCIES_READY=true
     log_info "Todas as dependências Python já estão instaladas e validadas! Pulando pip install..."
 fi
