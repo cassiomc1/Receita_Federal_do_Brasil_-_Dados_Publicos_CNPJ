@@ -48,14 +48,24 @@ Opções adicionais do script:
 # Ver todas as opções
 sudo ./executar_oracle_linux_9.sh --help
 
+# Verificar se há nova versão mensal na Receita Federal (em 2 segundos, sem baixar arquivos)
+sudo ./executar_oracle_linux_9.sh --check-update
+
+# Atualizar a base para a versão mais recente da RFB (substituição limpa sem duplicação)
+sudo ./executar_oracle_linux_9.sh --update
+
 # Customizar senha do banco, diretório de armazenamento e confirmar automaticamente
 sudo ./executar_oracle_linux_9.sh --db-password "suasenha" --data-dir "/dados/rfb" -y
 
-# Forçar recarga do zero (limpar histórico de checkpoints anteriores)
-sudo ./executar_oracle_linux_9.sh --reset
+# Forçar recarga da mesma versão do zero (mesmo se o banco já estiver atualizado)
+sudo ./executar_oracle_linux_9.sh --force --reset
 ```
 
-> **Recuperação e Retomada Automática (Checkpointing):** Caso a execução seja interrompida (por queda de conexão, reinicialização ou erro), basta executar o script novamente. Ele identificará o que já foi baixado, descompactado e gravado no banco de dados via tabela de controle `_controle_etl`, continuando exatamente do ponto onde parou sem refazer o trabalho anterior e sem duplicar dados.
+> **Atualização Mensal Inteligente (Zero Duplicação):** A Receita Federal publica mensalmente um *snapshot* integral de todas as ~55+ milhões de empresas do país (e não diferenças/deltas). O pipeline agora inclui controle de versão na tabela `_metadados_rfb`:
+> - Se o banco já estiver na versão mais recente da RFB, o script avisa imediatamente e não repete o download nem a carga.
+> - Ao detectar uma nova versão (ex: `2026-08` -> `2026-09`), os novos arquivos são organizados por mês e a atualização é realizada com substituição limpa, garantindo que o banco permaneça íntegro e **sem nenhum registro duplicado**.
+
+> **Recuperação e Retomada Automática (Checkpointing):** Caso a execução seja interrompida (por queda de conexão, reinicialização ou erro), basta executar o script novamente. Ele identificará o que já foi baixado, descompactado e gravado no banco de dados via tabela de controle `_controle_etl` (indexada por mês e arquivo), continuando exatamente do ponto onde parou sem refazer o trabalho anterior.
 
 ---------------------
 

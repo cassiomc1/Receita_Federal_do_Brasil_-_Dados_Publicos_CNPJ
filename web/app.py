@@ -39,6 +39,7 @@ try:
         CACHE_DOMINIOS,
         get_connection,
         release_connection,
+        get_rfb_metadata,
         DB_NAME,
         DB_HOST,
     )
@@ -65,6 +66,7 @@ except ImportError:
         CACHE_DOMINIOS,
         get_connection,
         release_connection,
+        get_rfb_metadata,
         DB_NAME,
         DB_HOST,
     )
@@ -218,12 +220,14 @@ def api_status():
                     (SELECT COUNT(*) FROM "estabelecimento") AS total_est;
             """)
             emp_count, est_count = cur.fetchone()
+            meta_rfb = get_rfb_metadata()
             return jsonify({
                 "status": "online",
                 "database": DB_NAME,
                 "host": DB_HOST,
                 "total_empresas": emp_count,
                 "total_estabelecimentos": est_count,
+                "versao_rfb": meta_rfb,
             })
     except Exception as e:
         return jsonify({
@@ -235,6 +239,52 @@ def api_status():
     finally:
         if conn:
             release_connection(conn)
+
+@app.route("/api/verificar-atualizacao", methods=["GET"])
+@login_required
+def api_verificar_atualizacao():
+    """Consulta o WebDAV oficial da Receita Federal e verifica se há nova base disponível."""
+    import requests
+    from xml.etree import ElementTree
+    import re
+
+    meta_banco = get_rfb_metadata()
+    mes_banco = meta_banco["ano_mes"] if meta_banco else None
+
+    share_token = os.getenv("RFB_SHARE_TOKEN", "YggdBLfdninEJX9")
+    webdav_base_url = os.getenv("RFB_WEBDAV_URL", "https://arquivos.receitafederal.gov.br/public.php/webdav")
+
+    try:
+        DAV_NS = {"d": "DAV:"}
+        url = webdav_base_url.rstrip("/") + "/"
+        headers = {"Depth": "1"}
+        resp = requests.request("PROPFIND", url, auth=(share_token, ""), headers=headers, verify=False, timeout=15)
+        resp.raise_for_status()
+        root = ElementTree.fromstring(resp.content)
+
+        directories = []
+        for r in root.findall("d:response", DAV_NS):
+            href = r.find("d:href", DAV_NS).text
+            match = re.search(r"(\d{4}-\d{2})/?$", href)
+            if match:
+                directories.append(match.group(1))
+        directories.sort()
+
+        if not directories:
+            return jsonify({"status": "erro", "mensagem": "Nenhuma pasta mensal localizada na RFB"}), 502
+
+        mes_remoto = directories[-1]
+        tem_atualizacao = bool(not mes_banco or mes_banco != mes_remoto)
+
+        return jsonify({
+            "status": "sucesso",
+            "mes_remoto": mes_remoto,
+            "mes_banco": mes_banco,
+            "tem_atualizacao": tem_atualizacao,
+            "metadados_banco": meta_banco,
+        })
+    except Exception as e:
+        return jsonify({"status": "erro", "mensagem": f"Falha ao conectar com o servidor da RFB: {e}"}), 502
 
 # --------------------------------------------------------------------------------------------------
 # Ponto de Entrada da Execução

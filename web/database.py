@@ -589,6 +589,31 @@ def generate_csv_stream(filters, max_rows=10000):
         output.seek(0)
         output.truncate(0)
 
+def get_rfb_metadata():
+    """Retorna metadados da base RFB atualmente carregada no banco (_metadados_rfb)."""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT "ano_mes", "status", "concluido_em", "total_empresas", "total_estabelecimentos", "total_socios"
+                FROM "_metadados_rfb"
+                WHERE "status" = 'CONCLUIDO'
+                ORDER BY "concluido_em" DESC, "ano_mes" DESC
+                LIMIT 1;
+            """)
+            row = cur.fetchone()
+            if row:
+                return {
+                    "ano_mes": row[0],
+                    "status": row[1],
+                    "concluido_em": row[2].strftime("%d/%m/%Y %H:%M") if row[2] else None,
+                    "total_empresas": row[3],
+                    "total_estabelecimentos": row[4],
+                    "total_socios": row[5],
+                }
+    except Exception:
+        pass
+    return None
+
 # Inicializa pool e caches na importação
 init_pool()
 load_domain_caches()

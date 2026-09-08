@@ -38,6 +38,12 @@
             </div>
 
             <div class="flex items-center gap-3">
+                <!-- Versão da Base RFB -->
+                <div id="rfb-version-badge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-100 text-zinc-700 border border-zinc-200">
+                    <i data-lucide="database" class="w-3.5 h-3.5 text-zinc-500"></i>
+                    <span id="rfb-version-text">Base RFB: Carregando...</span>
+                </div>
+
                 <!-- Status do Banco de Dados -->
                 <div id="db-status-badge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -755,9 +761,34 @@
         });
         document.getElementById('btn-last').addEventListener('click', () => fetchEmpresas(currentTotalPages));
 
+        // Carrega versão da RFB e status do banco
+        async function loadStatusAndVersion() {
+            try {
+                const res = await fetch('/api/status');
+                if (res.ok) {
+                    const data = await res.json();
+                    const versionBadge = document.getElementById('rfb-version-badge');
+                    const versionText = document.getElementById('rfb-version-text');
+                    if (data.versao_rfb && data.versao_rfb.ano_mes) {
+                        const parts = data.versao_rfb.ano_mes.split('-');
+                        const formatted = parts.length === 2 ? `${parts[1]}/${parts[0]}` : data.versao_rfb.ano_mes;
+                        versionText.innerText = `Base RFB: ${formatted}`;
+                        versionBadge.title = `Concluído em: ${data.versao_rfb.concluido_em || 'N/D'} | ${Number(data.versao_rfb.total_empresas || 0).toLocaleString('pt-BR')} empresas`;
+                        versionBadge.classList.remove('hidden');
+                    } else if (data.status === 'online') {
+                        versionText.innerText = 'Base RFB: Conectada';
+                        versionBadge.classList.remove('hidden');
+                    }
+                }
+            } catch (err) {
+                console.error('Erro ao verificar status:', err);
+            }
+        }
+
         // Inicialização
         document.addEventListener('DOMContentLoaded', () => {
             loadDomains();
+            loadStatusAndVersion();
             fetchEmpresas(1);
         });
     </script>
