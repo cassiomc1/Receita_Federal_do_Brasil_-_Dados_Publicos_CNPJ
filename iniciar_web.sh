@@ -2,7 +2,8 @@
 # ==================================================================================================
 # Script: iniciar_web.sh
 # Finalidade: Inicializar o servidor da interface web do CNPJ Explorer (Shadcn UI Minimalista)
-#             Verifica se o firewall está ativo e adiciona a porta usada nas regras (Oracle Linux 9)
+#             Verifica e libera o firewall automaticamente (Oracle Linux 9)
+#             Verifica e instala automaticamente dependências faltantes (Flask, etc.)
 #
 # Uso:
 #   ./iniciar_web.sh [--port 5000] [--host 0.0.0.0]
@@ -121,12 +122,73 @@ verificar_e_liberar_firewall() {
 # Executa verificação e liberação do firewall
 verificar_e_liberar_firewall "$PORT"
 
-# Ativa o ambiente virtual se existir
+# --------------------------------------------------------------------------------------------------
+# Preparação do Ambiente Python e Dependências Web
+# --------------------------------------------------------------------------------------------------
+# Ativa o ambiente virtual se existir em locais conhecidos
 if [[ -f "${SCRIPT_DIR}/venv/bin/activate" ]]; then
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/venv/bin/activate"
+elif [[ -f "/home/opc/Receita_Federal_do_Brasil_-_Dados_Publicos_CNPJ/venv/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source "/home/opc/Receita_Federal_do_Brasil_-_Dados_Publicos_CNPJ/venv/bin/activate"
+fi
+
+# Detecta interpretador Python
+PYTHON_EXEC="python3"
+if ! command -v python3 &>/dev/null && command -v python3.11 &>/dev/null; then
+    PYTHON_EXEC="python3.11"
+fi
+
+# Garante que o módulo Flask e dependências web estejam instalados
+if ! $PYTHON_EXEC -c "import flask" &>/dev/null; then
+    log_warn "Módulo 'flask' não encontrado no ambiente Python atual ($($PYTHON_EXEC -V 2>&1))."
+    log_info "Instalando dependências web necessárias..."
+
+    INSTALLED=false
+
+    # 1. Se venv existir, usa o pip do venv
+    if [[ -f "${SCRIPT_DIR}/venv/bin/pip" ]]; then
+        if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
+            "${SCRIPT_DIR}/venv/bin/pip" install -r "${SCRIPT_DIR}/requirements.txt" --quiet && INSTALLED=true || true
+        else
+            "${SCRIPT_DIR}/venv/bin/pip" install flask psycopg2-binary SQLAlchemy python-dotenv --quiet && INSTALLED=true || true
+        fi
+    fi
+
+    # 2. Se pip estiver no PATH (venv ativo ou sistema)
+    if [ "$INSTALLED" = false ]; then
+        if command -v pip &>/dev/null; then
+            pip install flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || \
+            pip install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || true
+        elif command -v pip3 &>/dev/null; then
+            pip3 install flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || \
+            pip3 install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || true
+        else
+            $PYTHON_EXEC -m pip install flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || \
+            $PYTHON_EXEC -m pip install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv --quiet 2>/dev/null && INSTALLED=true || true
+        fi
+    fi
+
+    # 3. Fallback DNF no Oracle Linux 9 se pip não estava instalado
+    if ! $PYTHON_EXEC -c "import flask" &>/dev/null && command -v dnf &>/dev/null; then
+        log_info "Tentando instalação via gerenciador de pacotes DNF (Oracle Linux 9)..."
+        if [[ $EUID -eq 0 ]]; then
+            dnf install -y python3-pip python3-flask 2>/dev/null || true
+        elif command -v sudo &>/dev/null; then
+            sudo dnf install -y python3-pip python3-flask 2>/dev/null || true
+        fi
+    fi
+
+    if $PYTHON_EXEC -c "import flask" &>/dev/null; then
+        log_success "Dependências web instaladas com sucesso!"
+    else
+        log_error "Não foi possível instalar o Flask automaticamente."
+        log_info "Execute manualmente: pip install flask (ou dnf install -y python3-pip && pip install flask)"
+        exit 1
+    fi
 fi
 
 # Inicia o aplicativo Flask
 export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
-python3 -m web.app "$@"
+exec $PYTHON_EXEC -m web.app "$@"

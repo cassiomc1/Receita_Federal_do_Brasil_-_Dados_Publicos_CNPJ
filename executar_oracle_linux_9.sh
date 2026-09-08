@@ -97,6 +97,7 @@ python-dotenv>=1.0.1
 tqdm>=4.66.0
 certifi>=2024.2.2
 urllib3>=2.0.0
+flask>=3.0.0
 EOF
     log_success "requirements.txt criado com sucesso."
 fi
@@ -1466,7 +1467,7 @@ else
 fi
 
 DEPENDENCIES_READY=false
-if "$VENV_DIR/bin/python" -c "import pandas, psycopg2, sqlalchemy, requests, dotenv, tqdm" &>/dev/null; then
+if "$VENV_DIR/bin/python" -c "import pandas, psycopg2, sqlalchemy, requests, dotenv, tqdm, flask" &>/dev/null; then
     DEPENDENCIES_READY=true
     log_info "Todas as dependências Python já estão instaladas e validadas! Pulando pip install..."
 fi
