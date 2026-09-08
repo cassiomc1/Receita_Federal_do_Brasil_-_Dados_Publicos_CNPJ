@@ -1,59 +1,111 @@
 # Dados Públicos CNPJ
-- Fonte oficial da Receita Federal do Brasil, [aqui](https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj).
-- Layout dos arquivos, [aqui](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf).
+- Fonte oficial da Receita Federal do Brasil: [Portal de Dados Abertos](https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj) ou repositório direto [arquivos.receitafederal.gov.br](https://arquivos.receitafederal.gov.br/).
+- Layout oficial dos arquivos (metadados): [cnpj-metadados.pdf](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf).
 
-A Receita Federal do Brasil disponibiliza bases com os dados públicos do cadastro nacional de pessoas jurídicas (CNPJ).
+A Receita Federal do Brasil disponibiliza mensalmente bases completas com os dados públicos do Cadastro Nacional de Pessoas Jurídicas (CNPJ).
 
-De forma geral, nelas constam as mesmas informações que conseguimos ver no cartão do CNPJ, quando fazemos uma consulta individual, acrescidas de outros dados de Simples Nacional, sócios e etc. Análises muito ricas podem sair desses dados, desde econômicas, mercadológicas até investigações.
+De forma geral, nelas constam as informações do cadastro e cartão CNPJ (matriz e filiais), sócios, opção pelo Simples Nacional e MEI, além de tabelas de domínio auxiliar (CNAEs, Natureza Jurídica, Municípios, etc.).
 
-Nesse repositório consta um processo de ETL para **i)** baixar os arquivos; **ii)** descompactar; **iii)** ler, tratar e **iv)** inserir num banco de dados relacional PostgreSQL.
+Neste repositório consta um pipeline de ETL para:
+1. **Identificar e baixar** automaticamente os arquivos da base mais recente via WebDAV oficial da Receita Federal (com resumo de downloads interrompidos e barra de progresso);
+2. **Descompactar** os arquivos `.zip`;
+3. **Ler e tratar** os dados em fluxo contínuo de memória (*chunking*);
+4. **Inserir em alta performance** num banco de dados relacional PostgreSQL utilizando o comando nativo `COPY`.
+
+> **Compatibilidade com o CNPJ Alfanumérico:**  
+> A estrutura e tipagem dos campos de CNPJ (`cnpj_basico`, `cnpj_ordem`, `cnpj_dv`) foram preparadas para suportar a **Instrução Normativa RFB nº 2.229/2024**, que estabelece o formato alfanumérico para o CNPJ.
 
 ---------------------
 
-### Infraestrutura necessária:
-- [Python 3.8](https://www.python.org/downloads/release/python-3810/)
-- [PostgreSQL 14.2](https://www.postgresql.org/download/)
+### Infraestrutura recomendada:
+- [Python 3.10+](https://www.python.org/downloads/)
+- [PostgreSQL 14+](https://www.postgresql.org/download/) (testado até PostgreSQL 17)
+- Espaço em disco recomendado: pelo menos 80 GB livres para armazenamento dos arquivos compactados, descompactados e banco de dados.
 
 ---------------------
 
-### How to use:
-1. Com o Postgres instalado, inicie a instância do servidor (pode ser local) e crie o banco de dados conforme o arquivo `banco_de_dados.sql`.
+### Execução Automatizada (Oracle Linux 9 / RHEL 9 / Rocky / AlmaLinux):
 
-2. Crie um arquivo `.env` no diretório `code`, conforme as variáveis de ambiente do seu ambiente de trabalho (localhost). Utilize como referência o arquivo `.env_template`. Você pode também, por exemplo, renomear o arquivo de `.env_template` para apenas `.env` e então utilizá-lo:
-   - `OUTPUT_FILES_PATH`: diretório de destino para o donwload dos arquivos
-   - `EXTRACTED_FILES_PATH`: diretório de destino para a extração dos arquivos .zip
-   - `DB_USER`: usuário do banco de dados criado pelo arquivo `banco_de_dados.sql`
-   - `DB_PASSWORD`: senha do usuário do BD
-   - `DB_HOST`: host da conexão com o BD
-   - `DB_PORT`: porta da conexão com o BD
-   - `DB_NAME`: nome da base de dados na instância (`Dados_RFB` - conforme arquivo `banco_de_dados.sql`)
+Para instalar o PostgreSQL 16, aplicar tuning de performance para ingestão massiva, configurar o ambiente Python e executar todo o processo (download, descompactação e carga no banco) de forma 100% automática:
 
-3. Instale as bibliotecas necessárias, disponíveis em `requirements.txt`:
-```
-pip install -r requirements.txt
+```bash
+# Conceda permissão de execução (se necessário)
+chmod +x executar_oracle_linux_9.sh
+
+# Execute com privilégios de superusuário
+sudo ./executar_oracle_linux_9.sh
 ```
 
-4. Execute o arquivo `ETL_coletar_dados_e_gravar_BD.py` e aguarde a finalização do processo.
-   - Os arquivos são grandes. Dependendo da infraestrutura isso deve levar muitas horas para conclusão.
-   - Arquivos de 08/05/2021: `4,68 GB` compactados e `17,1 GB` descompactados.
+> **Dica (Sessões Remotas/SSH):** Como o download e a carga completa podem levar mais de uma hora dependendo da sua conexão e do hardware, recomendamos executar dentro de uma sessão `tmux` ou `screen`:
+> ```bash
+> tmux new -s rfb
+> sudo ./executar_oracle_linux_9.sh
+> # Para desconectar: Ctrl+B seguido de D. Para reconectar: tmux attach -t rfb
+> ```
+
+Opções adicionais do script:
+```bash
+# Ver todas as opções
+sudo ./executar_oracle_linux_9.sh --help
+
+# Customizar senha do banco, diretório de armazenamento e confirmar automaticamente
+sudo ./executar_oracle_linux_9.sh --db-password "suasenha" --data-dir "/dados/rfb" -y
+
+# Forçar recarga do zero (limpar histórico de checkpoints anteriores)
+sudo ./executar_oracle_linux_9.sh --reset
+```
+
+> **Recuperação e Retomada Automática (Checkpointing):** Caso a execução seja interrompida (por queda de conexão, reinicialização ou erro), basta executar o script novamente. Ele identificará o que já foi baixado, descompactado e gravado no banco de dados via tabela de controle `_controle_etl`, continuando exatamente do ponto onde parou sem refazer o trabalho anterior e sem duplicar dados.
+
+---------------------
+
+### Como utilizar manualmente (Outros sistemas / Passo a passo):
+
+1. **Instalar dependências:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Preparar o banco de dados:**
+   Com o PostgreSQL instalado e rodando, crie a base de dados executando o arquivo `code/banco_de_dados.sql`.
+
+3. **Configurar as variáveis de ambiente:**
+   Copie o arquivo `.env_template` no diretório `code` (ou na raiz do repositório) para um arquivo `.env`:
+   ```bash
+   cp code/.env_template code/.env
+   ```
+   Edite o `.env` informando os caminhos das pastas e credenciais de acesso ao seu banco de dados:
+   - `OUTPUT_FILES_PATH`: diretório para download dos arquivos `.zip`
+   - `EXTRACTED_FILES_PATH`: diretório para a extração dos arquivos descompactados
+   - `DB_USER`: usuário do PostgreSQL
+   - `DB_PASSWORD`: senha do usuário
+   - `DB_HOST`: host do banco (ex: `localhost`)
+   - `DB_PORT`: porta do banco (ex: `5432`)
+   - `DB_NAME`: nome da base de dados (`Dados_RFB`)
+   - *(Opcional)* `RFB_ANO_MES`: especifique um mês/ano fixo (ex: `2026-08`). Se omitido, o script detecta e baixa automaticamente a base mais recente disponível.
+
+4. **Executar o processo de ETL:**
+   ```bash
+   python code/ETL_coletar_dados_e_gravar_BD.py
+   ```
+   O script também pode ser executado interativamente célula a célula (estilo Jupyter / `# %%`) no VS Code, PyCharm ou Spyder.
 
 ---------------------
 
 ### Tabelas geradas:
-- Para maiores informações, consulte o [layout](https://www.gov.br/receitafederal/pt-br/assuntos/orientacao-tributaria/cadastros/consultas/arquivos/NOVOLAYOUTDOSDADOSABERTOSDOCNPJ.pdf).
-  - `empresa`: dados cadastrais da empresa em nível de matriz
-  - `estabelecimento`: dados analíticos da empresa por unidade / estabelecimento (telefones, endereço, filial, etc)
-  - `socios`: dados cadastrais dos sócios das empresas
-  - `simples`: dados de MEI e Simples Nacional
-  - `cnae`: código e descrição dos CNAEs
-  - `quals`: tabela de qualificação das pessoas físicas - sócios, responsável e representante legal.
-  - `natju`: tabela de naturezas jurídicas - código e descrição.
-  - `moti`: tabela de motivos da situação cadastral - código e descrição.
-  - `pais`: tabela de países - código e descrição.
-  - `munic`: tabela de municípios - código e descrição.
+Para maiores detalhes, consulte o documento oficial de [Metadados](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf).
+- `empresa`: dados cadastrais da empresa em nível de matriz (razão social, porte, natureza jurídica, capital social, etc.)
+- `estabelecimento`: dados por unidade/filial (endereço, telefones, e-mail, CNAE fiscal principal e secundários, situação cadastral, etc.)
+- `socios`: dados do quadro de sócios e administradores (QSA)
+- `simples`: dados de enquadramento no Simples Nacional e MEI
+- `cnae`: código e descrição dos CNAEs
+- `quals`: qualificação de sócios, responsável e representante legal
+- `natju`: tabela de naturezas jurídicas
+- `moti`: motivos da situação cadastral
+- `pais`: códigos e nomes de países
+- `munic`: códigos e nomes de municípios
 
-
-- Pelo volume de dados, as tabelas  `empresa`, `estabelecimento`, `socios` e `simples` possuem índices para a coluna `cnpj_basico`, que é a principal chave de ligação entre elas.
+As tabelas `empresa`, `estabelecimento`, `socios` e `simples` recebem índices automáticos na coluna `cnpj_basico` ao final da carga para otimizar pesquisas e cruzamentos.
 
 ### Modelo de Entidade Relacionamento:
 ![alt text](https://github.com/aphonsoar/Receita_Federal_do_Brasil_-_Dados_Publicos_CNPJ/blob/master/Dados_RFB_ERD.png)

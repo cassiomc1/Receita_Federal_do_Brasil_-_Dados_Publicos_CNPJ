@@ -1,9 +1,133 @@
+#!/usr/bin/env bash
+# ==================================================================================================
+# Script: executar_oracle_linux_9.sh
+# Finalidade: Automação completa para Oracle Linux 9 (ou RHEL 9 / Rocky 9 / AlmaLinux 9):
+#   1. Instalação e configuração otimizada do PostgreSQL 16 (com detecção de passos já concluídos)
+#   2. Instalação de dependências do sistema e do ambiente Python
+#   3. Criação da base de dados "Dados_RFB" e ajuste de permissões
+#   4. Garantia de uso da versão moderna do ETL (WebDAV Nextcloud oficial da RFB, sem IP descontinuado)
+#   5. Download automático dos dados públicos mais recentes de CNPJ (com suporte a resumo)
+#   6. Descompactação inteligente (pula arquivos já extraídos com mesmo tamanho)
+#   7. Carga de alta performance com PostgreSQL COPY e retomada por checkpoint (não refaz o que já fez)
+#   8. Criação de índices para consultas rápidas
+#
+# Uso:
+#   sudo ./executar_oracle_linux_9.sh [OPÇÕES]
+# ==================================================================================================
+
+set -euo pipefail
+
+# --------------------------------------------------------------------------------------------------
+# Cores e Formatação de Log
+# --------------------------------------------------------------------------------------------------
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[SUCESSO]${NC} $1"; }
+log_warn()    { echo -e "${YELLOW}[AVISO]${NC} $1"; }
+log_error()   { echo -e "${RED}[ERRO]${NC} $1"; }
+log_title()   {
+    echo -e "\n${CYAN}${BOLD}======================================================================${NC}"
+    echo -e "${CYAN}${BOLD} $1 ${NC}"
+    echo -e "${CYAN}${BOLD}======================================================================${NC}\n"
+}
+
+# --------------------------------------------------------------------------------------------------
+# Localização Inteligente do Repositório e Arquivos do Projeto
+# --------------------------------------------------------------------------------------------------
+SCRIPT_EXEC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ORIGINAL_USER="${SUDO_USER:-$USER}"
+ORIGINAL_HOME="$HOME"
+if command -v getent &>/dev/null; then
+    ORIGINAL_HOME="$(getent passwd "$ORIGINAL_USER" 2>/dev/null | cut -d: -f6 || echo "$HOME")"
+fi
+
+PROJECT_DIR=""
+CANDIDATE_DIRS=(
+    "$SCRIPT_EXEC_DIR"
+    "$SCRIPT_EXEC_DIR/Receita_Federal_do_Brasil_-_Dados_Publicos_CNPJ"
+    "$(pwd)"
+    "$(pwd)/Receita_Federal_do_Brasil_-_Dados_Publicos_CNPJ"
+    "${ORIGINAL_HOME}/Receita_Federal_do_Brasil_-_Dados_Publicos_CNPJ"
+    "/home/opc/Receita_Federal_do_Brasil_-_Dados_Publicos_CNPJ"
+)
+
+for dir in "${CANDIDATE_DIRS[@]}"; do
+    if [[ -d "$dir/code" && -f "$dir/code/ETL_coletar_dados_e_gravar_BD.py" ]]; then
+        PROJECT_DIR="$dir"
+        break
+    fi
+done
+
+if [[ -z "$PROJECT_DIR" ]]; then
+    FOUND_CODE=$(find "$SCRIPT_EXEC_DIR" "$ORIGINAL_HOME" "/home/opc" "$(pwd)" -maxdepth 3 -name "ETL_coletar_dados_e_gravar_BD.py" 2>/dev/null | head -1 || true)
+    if [[ -n "$FOUND_CODE" ]]; then
+        PROJECT_DIR="$(cd "$(dirname "$FOUND_CODE")/.." && pwd)"
+    fi
+fi
+
+if [[ -z "$PROJECT_DIR" ]]; then
+    PROJECT_DIR="${SCRIPT_EXEC_DIR}"
+    if [[ ! -d "${PROJECT_DIR}/code" ]]; then
+        mkdir -p "${PROJECT_DIR}/code"
+    fi
+fi
+
+cd "$PROJECT_DIR"
+log_info "Diretório ativo do projeto: $PROJECT_DIR"
+
+# --------------------------------------------------------------------------------------------------
+# Auto-Reparo e Garantia da Versão Moderna do Código ETL
+# --------------------------------------------------------------------------------------------------
+# Garante que o arquivo requirements.txt SEMPRE exista no diretório do projeto
+if [[ ! -f "${PROJECT_DIR}/requirements.txt" ]]; then
+    log_warn "requirements.txt não encontrado em $PROJECT_DIR. Gerando arquivo automaticamente..."
+    cat << 'EOF' > "${PROJECT_DIR}/requirements.txt"
+pandas>=2.0.0
+psycopg2-binary>=2.9.9
+SQLAlchemy>=2.0.0
+requests>=2.31.0
+python-dotenv>=1.0.1
+tqdm>=4.66.0
+certifi>=2024.2.2
+urllib3>=2.0.0
+EOF
+    log_success "requirements.txt criado com sucesso."
+fi
+
+# Garante que code/ETL_coletar_dados_e_gravar_BD.py utilize o novo WebDAV da RFB e não o IP antigo (200.152.38.155)
+ensure_modern_etl_script() {
+    local target="${PROJECT_DIR}/code/ETL_coletar_dados_e_gravar_BD.py"
+    local needs_update=false
+
+    if [[ ! -f "$target" ]]; then
+        log_warn "code/ETL_coletar_dados_e_gravar_BD.py não encontrado. Criando versão moderna..."
+        needs_update=true
+    elif grep -q "200.152.38.155" "$target" 2>/dev/null; then
+        log_warn "Detectado IP descontinuado da Receita Federal (200.152.38.155) em $target!"
+        log_info "Atualizando automaticamente para o novo servidor WebDAV oficial da Receita Federal..."
+        needs_update=true
+    elif ! grep -q "webdav_base_url" "$target" 2>/dev/null; then
+        log_warn "Versão de $target desatualizada (sem suporte a WebDAV). Atualizando..."
+        needs_update=true
+    fi
+
+    if [ "$needs_update" = true ]; then
+        mkdir -p "${PROJECT_DIR}/code"
+        cat << 'EOF_PYTHON_ETL' > "$target"
 # -*- coding: utf-8 -*-
 """
 Processo de ETL para Coleta e Carga dos Dados Públicos do CNPJ da Receita Federal do Brasil no PostgreSQL.
 
 Atualizado para o novo servidor de Dados Abertos (WebDAV Nextcloud da RFB),
-ingestão de alta performance com COPY no PostgreSQL e suporte ao CNPJ Alfanumérico (IN RFB nº 2.229/2024).
+ingestão de alta performance com COPY no PostgreSQL, retomada por checkpoints
+e suporte ao CNPJ Alfanumérico (IN RFB nº 2.229/2024).
 
 Autor original: Aphonso Henrique do Amaral Rafael
 Atualizado: 2026
@@ -125,12 +249,12 @@ def to_sql_fast(dataframe, name, engine, if_exists="append"):
                 )
                 s_buf.seek(0)
                 columns = ", ".join([f"\"{col}\"" for col in dataframe.columns])
-                sql = f"COPY \"{name}\" ({columns}) FROM STDIN WITH (FORMAT CSV, DELIMITER \x27;\x27, QUOTE \x27\"\x27, NULL \x27\x27)"
+                sql = f"COPY \"{name}\" ({columns}) FROM STDIN WITH (FORMAT CSV, DELIMITER ';', QUOTE '\"', NULL '')"
                 cur.copy_expert(sql=sql, file=s_buf)
             raw_conn.commit()
         finally:
             raw_conn.close()
-    except Exception as e:
+    except Exception:
         # Fallback para to_sql padrão do SQLAlchemy
         dataframe.to_sql(name=name, con=engine, if_exists="append", index=False, chunksize=4096)
 
@@ -700,3 +824,428 @@ Tabelas indexadas por cnpj_basico:
 """)
 
 print("\nProcesso de ETL 100% finalizado! Os dados estão prontos para consulta no PostgreSQL.")
+EOF_PYTHON_ETL
+        log_success "code/ETL_coletar_dados_e_gravar_BD.py atualizado para a versão moderna oficial com sucesso!"
+    fi
+}
+
+ensure_modern_etl_script
+
+# --------------------------------------------------------------------------------------------------
+# Variáveis de Configuração Padrão
+# --------------------------------------------------------------------------------------------------
+DB_HOST="localhost"
+DB_PORT="5432"
+DB_USER="postgres"
+DB_PASSWORD="postgres"
+DB_NAME="Dados_RFB"
+
+DATA_DIR="${PROJECT_DIR}/dados"
+OUTPUT_PATH="${DATA_DIR}/output_files"
+EXTRACTED_PATH="${DATA_DIR}/extracted_files"
+
+SKIP_INSTALL=false
+SKIP_DOWNLOAD=false
+SKIP_EXTRACT=false
+ASSUME_YES=false
+RESET_ETL=false
+RFB_ANO_MES=""
+
+# --------------------------------------------------------------------------------------------------
+# Exibição de Ajuda
+# --------------------------------------------------------------------------------------------------
+show_help() {
+    cat << EOF
+Uso: sudo $0 [OPÇÕES]
+
+Opções:
+  -p, --db-password SENHA   Senha para o usuário postgres (padrão: 'postgres')
+  -d, --db-name NOME        Nome da base de dados (padrão: 'Dados_RFB')
+  --port PORTA              Porta do PostgreSQL (padrão: 5432)
+  --data-dir DIRETORIO      Diretório raiz para armazenar os dados (padrão: '${PROJECT_DIR}/dados')
+  -m, --mes YYYY-MM         Mês/ano de referência fixo (ex: 2026-08). Padrão: mais recente disponível
+  -y, --yes                 Responde 'sim' para todas as confirmações
+  --reset                   Limpa histórico de controle do ETL e recarrega tabelas do zero
+  --skip-install            Pular instalação do PostgreSQL e pacotes do sistema
+  --skip-download           Pular download dos arquivos (caso já tenham sido baixados)
+  --skip-extract            Pular descompactação (caso já tenham sido descompactados)
+  -h, --help                Exibe esta tela de ajuda
+
+Exemplo de uso:
+  sudo ./executar_oracle_linux_9.sh
+
+Exemplo customizado:
+  sudo ./executar_oracle_linux_9.sh --db-password "minhasenha123" --data-dir "/dados/rfb" -y
+EOF
+    exit 0
+}
+
+# --------------------------------------------------------------------------------------------------
+# Tratamento de Parâmetros
+# --------------------------------------------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -p|--db-password)
+            DB_PASSWORD="$2"
+            shift 2
+            ;;
+        -d|--db-name)
+            DB_NAME="$2"
+            shift 2
+            ;;
+        --port)
+            DB_PORT="$2"
+            shift 2
+            ;;
+        --data-dir)
+            DATA_DIR="$2"
+            OUTPUT_PATH="${DATA_DIR}/output_files"
+            EXTRACTED_PATH="${DATA_DIR}/extracted_files"
+            shift 2
+            ;;
+        -m|--mes)
+            RFB_ANO_MES="$2"
+            shift 2
+            ;;
+        -y|--yes)
+            ASSUME_YES=true
+            shift
+            ;;
+        --reset)
+            RESET_ETL=true
+            shift
+            ;;
+        --skip-install)
+            SKIP_INSTALL=true
+            shift
+            ;;
+        --skip-download)
+            SKIP_DOWNLOAD=true
+            shift
+            ;;
+        --skip-extract)
+            SKIP_EXTRACT=true
+            shift
+            ;;
+        -h|--help)
+            show_help
+            ;;
+        *)
+            log_error "Opção desconhecida: $1"
+            show_help
+            ;;
+    esac
+done
+
+# --------------------------------------------------------------------------------------------------
+# Validações Iniciais de Ambiente
+# --------------------------------------------------------------------------------------------------
+log_title "INICIANDO PROCESSO - DADOS PÚBLICOS CNPJ (ORACLE LINUX 9)"
+
+if [[ $EUID -ne 0 ]]; then
+    log_error "Este script precisa ser executado como root ou com privilégios de sudo para gerenciar pacotes e serviços."
+    log_info "Execute com: sudo $0"
+    exit 1
+fi
+
+# Dica de sessão persistente para SSH
+if [[ -z "${TMUX:-}" && -z "${STY:-}" ]]; then
+    log_info "Dica para SSH: Como o processo completo pode demorar, execute no tmux para evitar cancelamento:"
+    log_info "  tmux new -s rfb"
+    log_info "  sudo $0"
+    echo ""
+fi
+
+# Verificação do SO
+if [[ -f /etc/os-release ]]; then
+    . /etc/os-release
+    OS_ID="${ID:-unknown}"
+    OS_VERSION_ID="${VERSION_ID:-0}"
+    MAJOR_VER="${OS_VERSION_ID%%.*}"
+    log_info "Sistema detectado: $PRETTY_NAME ($OS_ID versão $OS_VERSION_ID)"
+    if [[ "$MAJOR_VER" != "9" ]]; then
+        log_warn "Aviso: O script é otimizado para a versão 9 da família EL. Versão atual: $MAJOR_VER."
+    fi
+fi
+
+# Verificação de Espaço em Disco
+mkdir -p "$DATA_DIR" "$OUTPUT_PATH" "$EXTRACTED_PATH"
+DISK_FREE_KB=$(df -k "$DATA_DIR" 2>/dev/null | tail -1 | awk '{print $(NF-2)}' || echo "104857600")
+DISK_FREE_GB=$((DISK_FREE_KB / 1024 / 1024))
+
+log_info "Espaço livre na partição de dados ($DATA_DIR): ${DISK_FREE_GB} GB"
+if [[ $DISK_FREE_GB -lt 80 && "$ASSUME_YES" = false ]]; then
+    log_warn "ATENÇÃO: Recomenda-se pelo menos 80GB a 100GB livres. Você possui ${DISK_FREE_GB} GB."
+    if [ -t 0 ]; then
+        echo -n "Deseja continuar mesmo assim? [s/N]: "
+        read -r resp
+        if [[ ! "$resp" =~ ^[sSyY]$ ]]; then
+            log_info "Operação cancelada pelo usuário."
+            exit 0
+        fi
+    else
+        log_warn "Execução não interativa detectada: prosseguindo com a operação..."
+    fi
+fi
+
+# Cálculo dinâmico de performance para o PostgreSQL baseado na memória RAM
+TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "4194304")
+TOTAL_RAM_MB=$((TOTAL_RAM_KB / 1024))
+log_info "Memória RAM Total detectada: ${TOTAL_RAM_MB} MB"
+
+SHARED_BUFFERS_MB=$((TOTAL_RAM_MB / 4))
+[[ $SHARED_BUFFERS_MB -gt 4096 ]] && SHARED_BUFFERS_MB=4096
+[[ $SHARED_BUFFERS_MB -lt 512 ]] && SHARED_BUFFERS_MB=512
+
+MAINT_WORK_MEM_MB=$((TOTAL_RAM_MB / 8))
+[[ $MAINT_WORK_MEM_MB -gt 2048 ]] && MAINT_WORK_MEM_MB=2048
+[[ $MAINT_WORK_MEM_MB -lt 256 ]] && MAINT_WORK_MEM_MB=256
+
+# --------------------------------------------------------------------------------------------------
+# ETAPA 1: Instalação de Pacotes do Sistema e PostgreSQL 16 (Idempotente)
+# --------------------------------------------------------------------------------------------------
+log_title "ETAPA 1: VERIFICANDO PACOTES DO SISTEMA E POSTGRESQL 16"
+
+PACKAGES_ALREADY_INSTALLED=false
+if (rpm -q postgresql16-server &>/dev/null || rpm -q postgresql-server &>/dev/null) && \
+   command -v git &>/dev/null && command -v gcc &>/dev/null && command -v python3 &>/dev/null; then
+    PACKAGES_ALREADY_INSTALLED=true
+    log_info "Pacotes do sistema e PostgreSQL já detectados como instalados. Pulando DNF..."
+fi
+
+if [ "$SKIP_INSTALL" = false ] && [ "$PACKAGES_ALREADY_INSTALLED" = false ]; then
+    log_info "Configurando repositório EPEL..."
+    dnf install -y oracle-epel-release-el9 || dnf install -y epel-release || true
+
+    log_info "Instalando ferramentas essenciais..."
+    dnf install -y git curl wget unzip tar gcc make util-linux tmux procps-ng libpq-devel
+
+    log_info "Instalando Python..."
+    if dnf list python3.11 &>/dev/null; then
+        dnf install -y python3.11 python3.11-pip python3.11-devel
+    else
+        dnf install -y python3 python3-pip python3-devel
+    fi
+
+    log_info "Configurando repositório oficial PostgreSQL PGDG 16..."
+    ARCH="$(uname -m)"
+    PGDG_RPM="https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-${ARCH}/pgdg-redhat-repo-latest.noarch.rpm"
+    dnf install -y "$PGDG_RPM" || true
+    dnf -qy module disable postgresql || true
+    dnf install -y postgresql16-server postgresql16-contrib postgresql16
+fi
+
+# Configura PATH do PostgreSQL
+if [[ -d "/usr/pgsql-16/bin" ]]; then
+    export PATH=/usr/pgsql-16/bin:$PATH
+    echo 'export PATH=/usr/pgsql-16/bin:$PATH' > /etc/profile.d/pgsql16.sh
+fi
+
+# Inicialização do Cluster PostgreSQL (apenas se não inicializado)
+PG_DATA_DIR="/var/lib/pgsql/16/data"
+[[ ! -d "$PG_DATA_DIR" && -d "/var/lib/pgsql/data" ]] && PG_DATA_DIR="/var/lib/pgsql/data"
+
+if [[ ! -f "${PG_DATA_DIR}/PG_VERSION" ]]; then
+    log_info "Inicializando banco de dados do PostgreSQL 16..."
+    if [[ -f "/usr/pgsql-16/bin/postgresql-16-setup" ]]; then
+        /usr/pgsql-16/bin/postgresql-16-setup initdb
+    else
+        postgresql-setup --initdb
+    fi
+else
+    log_info "Cluster PostgreSQL já se encontrava inicializado em: $PG_DATA_DIR"
+fi
+
+# Configuração de Autenticação no pg_hba.conf (apenas se ainda não ajustado)
+PG_HBA="${PG_DATA_DIR}/pg_hba.conf"
+if [[ -f "$PG_HBA" ]]; then
+    if ! grep -q "# Conexao local por socket Unix - RFB" "$PG_HBA"; then
+        log_info "Ajustando regras de autenticação local no pg_hba.conf..."
+        cp "$PG_HBA" "${PG_HBA}.backup_$(date +%Y%m%d%H%M%S)"
+        cat << 'EOF' > "$PG_HBA"
+# Conexao local por socket Unix - RFB
+local   all             postgres                                trust
+local   all             all                                     peer
+# Conexoes locais IPv4 e IPv6
+host    all             all             127.0.0.1/32            scram-sha-256
+host    all             all             ::1/128                 scram-sha-256
+EOF
+    fi
+fi
+
+# Garante que o serviço está rodando
+if ! systemctl is-active --quiet postgresql-16 2>/dev/null && ! systemctl is-active --quiet postgresql 2>/dev/null; then
+    log_info "Iniciando serviço PostgreSQL..."
+    systemctl enable postgresql-16 2>/dev/null || systemctl enable postgresql 2>/dev/null || true
+    systemctl start postgresql-16 2>/dev/null || systemctl start postgresql 2>/dev/null || true
+else
+    log_info "Serviço PostgreSQL já está ativo e em execução."
+fi
+
+# Localiza psql
+PSQL_BIN="psql"
+if command -v /usr/pgsql-16/bin/psql &>/dev/null; then
+    PSQL_BIN="/usr/pgsql-16/bin/psql"
+fi
+
+# Aguarda serviço aceitar conexões
+for i in {1..30}; do
+    if sudo -u postgres "$PSQL_BIN" -c "SELECT 1;" &>/dev/null; then
+        break
+    fi
+    sleep 1
+done
+
+# --------------------------------------------------------------------------------------------------
+# ETAPA 2: Configuração e Banco de Dados (Idempotente)
+# --------------------------------------------------------------------------------------------------
+log_title "ETAPA 2: AJUSTE DE PERFORMANCE E BASE DE DADOS"
+
+CURRENT_SYNCHRONOUS_COMMIT=$(sudo -u postgres "$PSQL_BIN" -tAc "SHOW synchronous_commit;" 2>/dev/null || echo "")
+if [[ "$CURRENT_SYNCHRONOUS_COMMIT" != "off" ]]; then
+    log_info "Aplicando configurações de alta performance no PostgreSQL..."
+    sudo -u postgres "$PSQL_BIN" << EOF
+ALTER SYSTEM SET synchronous_commit = 'off';
+ALTER SYSTEM SET checkpoint_timeout = '30min';
+ALTER SYSTEM SET checkpoint_completion_target = '0.9';
+ALTER SYSTEM SET max_wal_size = '16GB';
+ALTER SYSTEM SET min_wal_size = '2GB';
+ALTER SYSTEM SET wal_buffers = '16MB';
+ALTER SYSTEM SET work_mem = '64MB';
+ALTER SYSTEM SET maintenance_work_mem = '${MAINT_WORK_MEM_MB}MB';
+ALTER SYSTEM SET shared_buffers = '${SHARED_BUFFERS_MB}MB';
+SELECT pg_reload_conf();
+EOF
+    systemctl restart postgresql-16 2>/dev/null || systemctl restart postgresql 2>/dev/null || true
+    for i in {1..30}; do
+        sudo -u postgres "$PSQL_BIN" -c "SELECT 1;" &>/dev/null && break
+        sleep 1
+    done
+else
+    log_info "Parâmetros de performance do PostgreSQL já configurados previamente."
+fi
+
+sudo -u postgres "$PSQL_BIN" -c "ALTER USER postgres WITH PASSWORD '${DB_PASSWORD}';"
+
+DB_EXISTS=$(sudo -u postgres "$PSQL_BIN" -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}';" 2>/dev/null || echo "0")
+if [[ "$DB_EXISTS" != "1" ]]; then
+    log_info "Criando base de dados '${DB_NAME}'..."
+    sudo -u postgres "$PSQL_BIN" -c "CREATE DATABASE \"${DB_NAME}\" OWNER postgres ENCODING 'UTF8';"
+    log_success "Base de dados '${DB_NAME}' criada com sucesso!"
+else
+    log_info "Base de dados '${DB_NAME}' já existe. Pulando criação."
+fi
+
+sudo -u postgres "$PSQL_BIN" -c "GRANT ALL PRIVILEGES ON DATABASE \"${DB_NAME}\" TO postgres;"
+
+# --------------------------------------------------------------------------------------------------
+# ETAPA 3: Preparação do Ambiente Virtual Python (Idempotente)
+# --------------------------------------------------------------------------------------------------
+log_title "ETAPA 3: PREPARANDO AMBIENTE VIRTUAL PYTHON"
+
+PYTHON_CMD="python3"
+if command -v python3.11 &>/dev/null; then
+    PYTHON_CMD="python3.11"
+fi
+
+VENV_DIR="${PROJECT_DIR}/venv"
+if [[ ! -d "$VENV_DIR" ]]; then
+    log_info "Criando ambiente virtual Python em: $VENV_DIR"
+    $PYTHON_CMD -m venv "$VENV_DIR"
+else
+    log_info "Ambiente virtual já existente em: $VENV_DIR"
+fi
+
+DEPENDENCIES_READY=false
+if "$VENV_DIR/bin/python" -c "import pandas, psycopg2, sqlalchemy, requests, dotenv, tqdm" &>/dev/null; then
+    DEPENDENCIES_READY=true
+    log_info "Todas as dependências Python já estão instaladas e validadas! Pulando pip install..."
+fi
+
+if [ "$DEPENDENCIES_READY" = false ]; then
+    log_info "Instalando/atualizando bibliotecas do requirements.txt..."
+    "$VENV_DIR/bin/pip" install --upgrade pip setuptools wheel --quiet
+    "$VENV_DIR/bin/pip" install -r "${PROJECT_DIR}/requirements.txt" --quiet
+    log_success "Dependências instaladas com sucesso!"
+fi
+
+# --------------------------------------------------------------------------------------------------
+# ETAPA 4: Configuração do Arquivo de Ambiente (.env)
+# --------------------------------------------------------------------------------------------------
+log_title "ETAPA 4: CONFIGURANDO ARQUIVO DE AMBIENTE (.env)"
+
+mkdir -p "$OUTPUT_PATH" "$EXTRACTED_PATH"
+
+if [[ -n "${ORIGINAL_USER:-}" && "$ORIGINAL_USER" != "root" ]]; then
+    chown -R "${ORIGINAL_USER}:${ORIGINAL_USER}" "$DATA_DIR" "$VENV_DIR" 2>/dev/null || true
+fi
+
+ENV_CONTENT=$(cat << EOF
+# Gerado por executar_oracle_linux_9.sh em $(date)
+OUTPUT_FILES_PATH=${OUTPUT_PATH}
+EXTRACTED_FILES_PATH=${EXTRACTED_PATH}
+
+# Conexao com o PostgreSQL
+DB_HOST=${DB_HOST}
+DB_PORT=${DB_PORT}
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
+DB_NAME=${DB_NAME}
+
+# Configuracoes do ETL
+RFB_ANO_MES=${RFB_ANO_MES}
+PULAR_DOWNLOAD=${SKIP_DOWNLOAD}
+PULAR_EXTRACAO=${SKIP_EXTRACT}
+RESET_ETL=${RESET_ETL}
+EOF
+)
+
+echo "$ENV_CONTENT" > "${PROJECT_DIR}/.env"
+echo "$ENV_CONTENT" > "${PROJECT_DIR}/code/.env"
+log_success "Arquivo .env configurado."
+
+# --------------------------------------------------------------------------------------------------
+# ETAPA 5: Execução do Pipeline de ETL (com retomada inteligente)
+# --------------------------------------------------------------------------------------------------
+log_title "ETAPA 5: EXECUTANDO O PROCESSO DE ETL"
+
+LOG_FILE="${PROJECT_DIR}/etl_rfb_$(date +%Y%m%d_%H%M%S).log"
+log_info "Log detalhado sendo gravado em: $LOG_FILE"
+log_info "Iniciando processamento Python..."
+
+START_TIME=$(date +%s)
+export PYTHONUNBUFFERED=1
+
+"${VENV_DIR}/bin/python" "${PROJECT_DIR}/code/ETL_coletar_dados_e_gravar_BD.py" 2>&1 | tee -a "$LOG_FILE"
+
+END_TIME=$(date +%s)
+TOTAL_DURATION=$((END_TIME - START_TIME))
+HOURS=$((TOTAL_DURATION / 3600))
+MINUTES=$(((TOTAL_DURATION % 3600) / 60))
+SECONDS=$((TOTAL_DURATION % 60))
+
+# --------------------------------------------------------------------------------------------------
+# ETAPA 6: Validação Final e Relatório
+# --------------------------------------------------------------------------------------------------
+log_title "ETAPA 6: VERIFICAÇÃO FINAL DOS DADOS CARREGADOS"
+
+sudo -u postgres "$PSQL_BIN" -d "$DB_NAME" << 'EOF' || true
+SELECT
+    'empresa' AS tabela, COUNT(*) AS total_registros FROM empresa
+UNION ALL
+SELECT
+    'estabelecimento', COUNT(*) FROM estabelecimento
+UNION ALL
+SELECT
+    'socios', COUNT(*) FROM socios
+UNION ALL
+SELECT
+    'simples', COUNT(*) FROM simples
+ORDER BY tabela;
+EOF
+
+log_title "PROCESSO FINALIZADO COM SUCESSO!"
+echo -e "Tempo total decorrido: ${BOLD}${HOURS}h ${MINUTES}m ${SECONDS}s${NC}"
+echo -e "Arquivo de log: ${BOLD}${LOG_FILE}${NC}"
+echo -e "\nPara consultar via terminal:"
+echo -e "  ${CYAN}sudo -u postgres psql -d ${DB_NAME}${NC}\n"
