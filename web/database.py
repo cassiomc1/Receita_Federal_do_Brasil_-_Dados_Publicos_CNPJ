@@ -2,7 +2,7 @@
 """
 Camada de Acesso a Dados do PostgreSQL para o Painel Web CNPJ.
 Inclui pool de conexões, cache de tabelas de domínio em memória,
-consultas parametrizadas de alta performance com paginação e exportação CSV.
+consultas parametrizadas de alta performance com paginação e exportação CSV / XLS (Excel).
 """
 
 import csv
@@ -588,6 +588,94 @@ def generate_csv_stream(filters, max_rows=10000):
         yield output.getvalue()
         output.seek(0)
         output.truncate(0)
+
+# --------------------------------------------------------------------------------------------------
+# Exportação Direta para Planilha Excel (XLS / XLSX)
+# --------------------------------------------------------------------------------------------------
+def generate_excel_file(filters, max_rows=10000):
+    """Gera uma planilha Excel (.xlsx / .xls) em memória com formatação e estilização profissional."""
+    import openpyxl
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    res = search_empresas(filters, page=1, page_size=max_rows)
+    items = res.get("results", [])
+
+    wb = openpyxl.Workbook(write_only=True)
+    ws = wb.create_sheet(title="Empresas RFB")
+
+    # Define larguras ajustadas para cada coluna
+    col_widths = {
+        "A": 22,  # CNPJ
+        "B": 38,  # Razão Social
+        "C": 32,  # Nome Fantasia
+        "D": 14,  # Tipo
+        "E": 18,  # Situação Cadastral
+        "F": 15,  # Data Situação
+        "G": 15,  # Data Início
+        "H": 15,  # CNAE Código
+        "I": 40,  # CNAE Descrição
+        "J": 8,   # UF
+        "K": 26,  # Município
+        "L": 14,  # Porte
+        "M": 22,  # Capital Social
+        "N": 38,  # Natureza Jurídica
+        "O": 18,  # Simples Nacional
+        "P": 12,  # MEI
+        "Q": 44,  # Endereço
+        "R": 18,  # Telefone
+        "S": 32,  # E-mail
+    }
+    for col, width in col_widths.items():
+        ws.column_dimensions[col].width = width
+
+    headers = [
+        "CNPJ", "Razão Social", "Nome Fantasia", "Tipo", "Situação Cadastral",
+        "Data Situação", "Data Início", "CNAE Código", "CNAE Descrição",
+        "UF", "Município", "Porte", "Capital Social", "Natureza Jurídica",
+        "Simples Nacional", "MEI", "Endereço", "Telefone", "E-mail"
+    ]
+
+    header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="18181B", end_color="18181B", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center")
+
+    header_row = []
+    for h in headers:
+        c = WriteOnlyCell(ws, value=h)
+        c.font = header_font
+        c.fill = header_fill
+        c.alignment = header_align
+        header_row.append(c)
+    ws.append(header_row)
+
+    for item in items:
+        ws.append([
+            item.get("cnpj", ""),
+            item.get("razao_social", ""),
+            item.get("nome_fantasia", ""),
+            item.get("tipo", ""),
+            item.get("situacao_cadastral", ""),
+            item.get("data_situacao", ""),
+            item.get("data_inicio", ""),
+            item.get("cnae_codigo", ""),
+            item.get("cnae_descricao", ""),
+            item.get("uf", ""),
+            item.get("municipio", ""),
+            item.get("porte", ""),
+            item.get("capital_social", ""),
+            item.get("natureza_juridica", ""),
+            item.get("simples", ""),
+            item.get("mei", ""),
+            item.get("endereco_resumo", ""),
+            item.get("telefone", ""),
+            item.get("email", ""),
+        ])
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
 
 def get_rfb_metadata():
     """Retorna metadados da base RFB atualmente carregada no banco (_metadados_rfb)."""
