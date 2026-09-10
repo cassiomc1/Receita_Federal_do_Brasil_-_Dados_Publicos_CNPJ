@@ -118,3 +118,5 @@ CREATE TABLE IF NOT EXISTS "quals" (
 -- CREATE INDEX IF NOT EXISTS estabelecimento_cnpj ON "estabelecimento"("cnpj_basico");
 -- CREATE INDEX IF NOT EXISTS socios_cnpj ON "socios"("cnpj_basico");
 -- CREATE INDEX IF NOT EXISTS simples_cnpj ON "simples"("cnpj_basico");
+-- Apoia a filtragem e a ordenação por data de criação (início de atividade) na interface web:
+-- CREATE INDEX IF NOT EXISTS estabelecimento_data_inicio_atividade ON "estabelecimento"("data_inicio_atividade");

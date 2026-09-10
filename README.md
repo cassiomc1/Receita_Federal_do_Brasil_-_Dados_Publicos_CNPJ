@@ -82,6 +82,7 @@ O repositório inclui uma interface web moderna, rápida e minimalista baseada n
   - Atividade & Porte: CNAE Principal, Natureza Jurídica, Porte da Empresa (ME, EPP, Demais).
   - Regimes Especiais: Optante pelo Simples Nacional (Sim/Não), Optante pelo MEI (Sim/Não).
   - Financeiro & Datas: Faixa de Capital Social (Mínimo / Máximo) e Data de Início de Atividade.
+  - Ordenação: Padrão (CNPJ), Data de Criação (mais recentes / mais antigas), Razão Social (A-Z / Z-A) e Capital Social (maior / menor). A ordenação escolhida é aplicada também às exportações CSV e XLS.
 - **Paginação Server-Side:** Paginação otimizada com seletor de itens por página (10, 25, 50, 100) e cálculo total de registros e páginas.
 - **Detalhes da Empresa:** Modal completo com abas detalhando Matriz, Endereço e Contato, Enquadramento Tributário, Quadro de Sócios e Administradores (QSA) e Filiais cadastradas.
 - **Exportação para CSV e XLS (Excel):** Exportação direta dos resultados filtrados para planilha Excel (.xlsx / .xls) com estilização de cabeçalho, larguras de colunas ajustadas e preservação de formatação de CNPJs e códigos, além de exportação em streaming CSV delimitado por `;` com codificação UTF-8 BOM.
@@ -161,7 +162,12 @@ Para maiores detalhes, consulte o documento oficial de [Metadados](https://www.g
 - `pais`: códigos e nomes de países
 - `munic`: códigos e nomes de municípios
 
-As tabelas `empresa`, `estabelecimento`, `socios` e `simples` recebem índices automáticos na coluna `cnpj_basico` ao final da carga para otimizar pesquisas e cruzamentos.
+As tabelas `empresa`, `estabelecimento`, `socios` e `simples` recebem índices automáticos na coluna `cnpj_basico` ao final da carga para otimizar pesquisas e cruzamentos. A tabela `estabelecimento` também recebe um índice em `data_inicio_atividade`, que acelera a filtragem e a ordenação por data de criação da empresa.
+
+> **Bases já carregadas anteriormente:** como o bloco de criação de índices é ignorado quando já foi executado para a versão atual da base, crie o índice de data manualmente uma única vez (pode levar alguns minutos em ~55 milhões de estabelecimentos):
+> ```sql
+> CREATE INDEX IF NOT EXISTS estabelecimento_data_inicio_atividade ON "estabelecimento"("data_inicio_atividade");
+> ```
 
 ### Modelo de Entidade Relacionamento:
 ![alt text](https://github.com/aphonsoar/Receita_Federal_do_Brasil_-_Dados_Publicos_CNPJ/blob/master/Dados_RFB_ERD.png)
