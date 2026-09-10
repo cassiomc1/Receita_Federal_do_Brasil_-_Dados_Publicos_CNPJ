@@ -103,6 +103,12 @@ chmod +x iniciar_web.sh
 ./iniciar_web.sh --port 8080 --host 0.0.0.0
 ```
 
+> **Dependências:** o script verifica **módulo a módulo** (e não apenas o Flask) e instala o que estiver faltando no interpretador que executa a aplicação. Se a exportação para Excel exibir o aviso de que `openpyxl` não está instalado, rode no servidor:
+> ```bash
+> ./venv/bin/pip install -r requirements.txt   # ou: ./venv/bin/pip install openpyxl
+> ```
+> A exportação em CSV não depende desse pacote e continua funcionando.
+
 Ao iniciar, as credenciais de acesso serão exibidas no terminal:
 ```text
 ======================================================================

@@ -90,6 +90,12 @@ def release_connection(conn):
             pass
 
 # --------------------------------------------------------------------------------------------------
+# Exceções
+# --------------------------------------------------------------------------------------------------
+class DependenciaAusenteError(RuntimeError):
+    """Pacote opcional necessário a um recurso (ex: exportação XLS) não está instalado."""
+
+# --------------------------------------------------------------------------------------------------
 # Cache em Memória das Tabelas de Domínio
 # --------------------------------------------------------------------------------------------------
 CACHE_DOMINIOS = {
@@ -677,9 +683,16 @@ def generate_csv_stream(filters, max_rows=10000):
 # --------------------------------------------------------------------------------------------------
 def generate_excel_file(filters, max_rows=10000):
     """Gera uma planilha Excel (.xlsx / .xls) em memória com formatação e estilização profissional."""
-    import openpyxl
-    from openpyxl.cell import WriteOnlyCell
-    from openpyxl.styles import Font, PatternFill, Alignment
+    try:
+        import openpyxl
+        from openpyxl.cell import WriteOnlyCell
+        from openpyxl.styles import Font, PatternFill, Alignment
+    except ImportError as e:
+        raise DependenciaAusenteError(
+            "A exportação para Excel requer o pacote 'openpyxl', que não está instalado neste "
+            "ambiente. Instale com 'pip install openpyxl' (ou 'pip install -r requirements.txt') "
+            "e reinicie o servidor. A exportação em CSV continua disponível."
+        ) from e
 
     res = search_empresas(filters, page=1, page_size=max_rows)
     items = res.get("results", [])
