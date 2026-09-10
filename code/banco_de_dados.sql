@@ -10,6 +10,14 @@ COMMENT ON DATABASE "Dados_RFB"
 
 -- Conectar ao banco "Dados_RFB" antes de executar as tabelas abaixo caso queira criá-las manualmente.
 -- O script Python ETL_coletar_dados_e_gravar_BD.py cria as tabelas automaticamente se não existirem.
+--
+-- ATENÇÃO (divergência de tipos): quando as tabelas são criadas pelo ETL (pandas/to_sql), algumas
+-- colunas assumem tipos diferentes deste DDL. Em especial, no schema gerado pelo ETL são INTEGER:
+--   "estabelecimento"."cnae_fiscal_principal", "data_inicio_atividade",
+--   "data_situacao_cadastral" e "data_situacao_especial"  (aqui declaradas como VARCHAR).
+-- Por isso o CNAE perde o zero à esquerda (0111301 -> 111301) e as datas viram números (20200101).
+-- A camada web (web/database.py) trata os dois formatos por meio de casts ::text, funcionando
+-- corretamente em ambos os schemas.
 
 -- 1. Tabela de Empresas (compatível com CNPJ Alfanumérico - IN RFB 2.229/2024)
 CREATE TABLE IF NOT EXISTS "empresa" (

@@ -131,14 +131,16 @@ LISTA_UFS = [
 # Ordenação dos Resultados
 # Whitelist rígida (chave da interface -> cláusula SQL) para evitar injeção de SQL via ORDER BY.
 # A "data de criação da empresa" é representada por est.data_inicio_atividade (formato YYYYMMDD),
-# que ordena corretamente de forma lexicográfica. NULLIF trata campos vazios como sem data.
+# que ordena corretamente de forma lexicográfica. O cast para texto mantém a ordenação correta
+# tanto no schema do ETL (coluna INTEGER) quanto no DDL (VARCHAR), e NULLIF trata campos vazios
+# e nulos como "sem data" (sempre ao final da listagem).
 # --------------------------------------------------------------------------------------------------
 ORDENACAO_PADRAO = "cnpj_asc"
 
 MAPA_ORDENACAO = {
     "cnpj_asc": "est.cnpj_basico ASC, est.cnpj_ordem ASC",
-    "data_criacao_desc": "NULLIF(est.data_inicio_atividade, '') DESC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
-    "data_criacao_asc": "NULLIF(est.data_inicio_atividade, '') ASC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
+    "data_criacao_desc": "NULLIF(est.data_inicio_atividade::text, '') DESC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
+    "data_criacao_asc": "NULLIF(est.data_inicio_atividade::text, '') ASC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
     "razao_social_asc": "emp.razao_social ASC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
     "razao_social_desc": "emp.razao_social DESC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
     "capital_social_desc": "emp.capital_social DESC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
@@ -185,6 +187,18 @@ def format_date(dt_str):
         return dt_str or ""
     s = str(dt_str)
     return f"{s[6:8]}/{s[4:6]}/{s[:4]}"
+
+def format_codigo(valor, tamanho):
+    """Normaliza códigos numéricos (ex: CNAE) preservando zeros à esquerda.
+
+    No schema gerado pelo to_sql do ETL essas colunas são INTEGER, o que descarta o zero
+    inicial (0111301 -> 111301) e impede a busca na tabela de domínio. O zfill restaura o
+    código original; valores não numéricos ou já preenchidos são devolvidos como estão.
+    """
+    if valor is None:
+        return ""
+    codigo = str(valor).strip()
+    return codigo.zfill(tamanho) if codigo.isdigit() else codigo
 
 def format_currency(val):
     if val is None:
@@ -272,9 +286,12 @@ def search_empresas(filters, page=1, page_size=25):
                 params.append(int(porte))
 
             # 9. CNAE Principal
+            # A coluna pode ser INTEGER (schema gerado pelo to_sql do ETL) ou VARCHAR (DDL).
+            # A conversão para texto com lpad mantém o filtro funcionando nos dois formatos e
+            # preserva os zeros à esquerda dos códigos CNAE (ex: 0111301).
             cnae = filters.get("cnae", "").strip().replace("-", "").replace("/", "")
             if cnae:
-                where_clauses.append("est.cnae_fiscal_principal LIKE %s")
+                where_clauses.append("lpad(est.cnae_fiscal_principal::text, 7, '0') LIKE %s")
                 params.append(f"{cnae}%")
 
             # 10. Natureza Jurídica
@@ -315,6 +332,8 @@ def search_empresas(filters, page=1, page_size=25):
                     pass
 
             # 14. Data de Início de Atividade
+            # A comparação com o literal YYYYMMDD funciona nos dois schemas (coluna INTEGER do
+            # ETL ou VARCHAR do DDL), pois o PostgreSQL converte o parâmetro para o tipo da coluna.
             dt_ini = filters.get("data_inicio_de", "").strip().replace("-", "").replace("/", "")
             if dt_ini:
                 where_clauses.append("est.data_inicio_atividade >= %s")
@@ -323,6 +342,9 @@ def search_empresas(filters, page=1, page_size=25):
             dt_fim = filters.get("data_inicio_ate", "").strip().replace("-", "").replace("/", "")
             if dt_fim:
                 where_clauses.append("est.data_inicio_atividade <= %s")
+                # Em colunas VARCHAR um registro sem data ("") casaria com "" <= "20211231";
+                # o predicado abaixo garante que apenas empresas com data preenchida retornem.
+                where_clauses.append("(est.data_inicio_atividade::text <> '')")
                 params.append(dt_fim)
 
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
@@ -388,7 +410,7 @@ def search_empresas(filters, page=1, page_size=25):
 
             results = []
             for r in rows:
-                cnae_cod = str(r[8] or "")
+                cnae_cod = format_codigo(r[8], 7)
                 cnae_desc = CACHE_DOMINIOS["cnae"].get(cnae_cod, "")
                 munic_cod = str(r[10] or "")
                 munic_nome = CACHE_DOMINIOS["munic"].get(munic_cod, "")
@@ -497,8 +519,8 @@ def get_empresa_details(cnpj_basico):
 
             # Processa dados estruturados
             matriz = estabelecimentos[0] if estabelecimentos else None
-            cnae_principal = matriz[9] if matriz else ""
-            cnae_desc = CACHE_DOMINIOS["cnae"].get(str(cnae_principal), "")
+            cnae_principal = format_codigo(matriz[9], 7) if matriz else ""
+            cnae_desc = CACHE_DOMINIOS["cnae"].get(cnae_principal, "")
             munic_nome = CACHE_DOMINIOS["munic"].get(str(matriz[18]), "") if matriz else ""
             natju_desc = CACHE_DOMINIOS["natju"].get(str(emp[2]), "")
 
@@ -512,7 +534,7 @@ def get_empresa_details(cnpj_basico):
                     "nome_fantasia": e[4] or "",
                     "situacao": MAPA_SITUACAO.get(e[5], f"Cód {e[5]}"),
                     "data_situacao": format_date(e[6]),
-                    "cnae": e[9] or "",
+                    "cnae": format_codigo(e[9], 7),
                     "endereco": f"{e[11] or ''} {e[12] or ''}, {e[13] or ''} - {e[15] or ''}, {CACHE_DOMINIOS['munic'].get(str(e[18]), '')} - {e[17] or ''} (CEP: {e[16] or ''})",
                     "contato": f"({e[19]}) {e[20]}" if e[19] and e[20] else e[23] or "",
                 })

@@ -591,6 +591,21 @@
 
                 tbody.innerHTML = '';
 
+                // Erros do banco de dados não devem ser confundidos com "nenhum resultado encontrado"
+                if (data.error) {
+                    emptyState.classList.add('hidden');
+                    const tr = document.createElement('tr');
+                    const td = document.createElement('td');
+                    td.colSpan = 9;
+                    td.className = 'py-8 px-4 text-center text-red-600';
+                    td.textContent = `Erro na consulta: ${data.error}`;
+                    tr.appendChild(td);
+                    tbody.appendChild(tr);
+                    totalText.innerText = 'Erro ao consultar o banco de dados';
+                    updatePagination(1, 1, 0);
+                    return;
+                }
+
                 if (!data.results || data.results.length === 0) {
                     emptyState.classList.remove('hidden');
                     totalText.innerText = '0 empresas encontradas';
