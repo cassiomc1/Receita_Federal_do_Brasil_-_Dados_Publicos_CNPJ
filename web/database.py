@@ -152,6 +152,26 @@ def resolve_ordenacao(ordenar_por):
     chave = str(ordenar_por or "").strip().lower()
     return MAPA_ORDENACAO.get(chave, MAPA_ORDENACAO[ORDENACAO_PADRAO])
 
+# --------------------------------------------------------------------------------------------------
+# Limite de Resultados
+# Permite trazer apenas os N primeiros registros que atendem aos filtros (ex: 100), evitando
+# varrer e transferir milhões de linhas em consultas amplas. Vale também para as exportações.
+# --------------------------------------------------------------------------------------------------
+LIMITE_MAXIMO = 10000
+
+def resolve_limite(valor, maximo=LIMITE_MAXIMO):
+    """Converte o limite informado em inteiro positivo; devolve None se vazio ou inválido."""
+    texto = str(valor or "").strip()
+    if not texto:
+        return None
+    try:
+        numero = int(float(texto))
+    except (TypeError, ValueError):
+        return None
+    if numero <= 0:
+        return None
+    return min(numero, maximo)
+
 def load_domain_caches():
     """Carrega pequenas tabelas de domínio na memória para aceleração extrema de consultas."""
     conn = None
@@ -352,7 +372,13 @@ def search_empresas(filters, page=1, page_size=25):
             # 15. Ordenação dos resultados (ex: por data de criação da empresa)
             order_sql = resolve_ordenacao(filters.get("ordenar_por", ""))
 
-            # Contagem total de registros (com teto para performance se for consulta muito ampla)
+            # 16. Limite de resultados (ex: trazer apenas 100 registros)
+            limite = resolve_limite(filters.get("limite", ""))
+
+            # Contagem total de registros (com teto para performance se for consulta muito ampla).
+            # Quando há limite, a contagem para no próprio limite: além de mais rápido, o total
+            # exibido passa a refletir exatamente quantos registros serão apresentados.
+            count_cap = min(limite, 10001) if limite else 10001
             count_query = f"""
                 SELECT COUNT(*) FROM (
                     SELECT 1
@@ -360,7 +386,7 @@ def search_empresas(filters, page=1, page_size=25):
                     INNER JOIN "empresa" emp ON emp.cnpj_basico = est.cnpj_basico
                     LEFT JOIN "simples" sim ON sim.cnpj_basico = est.cnpj_basico
                     {where_sql}
-                    LIMIT 10001
+                    LIMIT {int(count_cap)}
                 ) AS sub;
             """
             cur.execute(count_query, params)
@@ -369,7 +395,13 @@ def search_empresas(filters, page=1, page_size=25):
             # Paginação
             page = max(1, int(page))
             page_size = max(10, min(100, int(page_size)))
+            page_size_pagina = page_size
             offset = (page - 1) * page_size
+
+            # O limite incide sobre o total de registros, não sobre a página: a última página
+            # devolve apenas o que falta para completar o limite (e nada além dele).
+            if limite:
+                page_size_pagina = max(0, min(page_size, limite - offset))
 
             # Consulta paginada dos dados
             data_query = f"""
@@ -405,7 +437,7 @@ def search_empresas(filters, page=1, page_size=25):
                 ORDER BY {order_sql}
                 LIMIT %s OFFSET %s;
             """
-            cur.execute(data_query, params + [page_size, offset])
+            cur.execute(data_query, params + [page_size_pagina, offset])
             rows = cur.fetchall()
 
             results = []
@@ -450,6 +482,9 @@ def search_empresas(filters, page=1, page_size=25):
                 "results": results,
                 "total_records": total_records,
                 "is_capped": is_capped,
+                "limite": limite,
+                "limite_aplicado": bool(limite),
+                "limite_atingido": bool(limite and total_records >= limite),
                 "page": page,
                 "page_size": page_size,
                 "total_pages": total_pages,
