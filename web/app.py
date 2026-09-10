@@ -262,24 +262,25 @@ def api_dominios():
 @app.route("/api/status", methods=["GET"])
 @login_required
 def api_status():
-    """Verifica a saúde da conexão com o banco de dados e conta registros aproximados."""
+    """Verifica a saúde da conexão com o banco e retorna a versão/totais já registrados.
+
+    Não executa COUNT(*) nas tabelas de estabelecimentos/empresas: em ~55 milhões de linhas
+    cada contagem exige varredura completa e tornava a abertura da página pesada. Os totais
+    são lidos da tabela de metadados "_metadados_rfb", preenchida pelo ETL ao final da carga.
+    """
     conn = None
     try:
         conn = get_connection()
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM "empresa") AS total_empresa,
-                    (SELECT COUNT(*) FROM "estabelecimento") AS total_est;
-            """)
-            emp_count, est_count = cur.fetchone()
+            cur.execute("SELECT 1;")
+            cur.fetchone()
             meta_rfb = get_rfb_metadata()
             return jsonify({
                 "status": "online",
                 "database": DB_NAME,
                 "host": DB_HOST,
-                "total_empresas": emp_count,
-                "total_estabelecimentos": est_count,
+                "total_empresas": (meta_rfb or {}).get("total_empresas"),
+                "total_estabelecimentos": (meta_rfb or {}).get("total_estabelecimentos"),
                 "versao_rfb": meta_rfb,
             })
     except Exception as e:

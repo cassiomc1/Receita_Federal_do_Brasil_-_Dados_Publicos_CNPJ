@@ -235,7 +235,7 @@
             <div class="px-5 py-4 border-b border-zinc-200 flex flex-wrap items-center justify-between gap-3 bg-white">
                 <div>
                     <h3 class="text-sm font-semibold text-zinc-900">Resultados da Consulta</h3>
-                    <p id="total-count-text" class="text-xs text-zinc-500 mt-0.5">Carregando dados...</p>
+                    <p id="total-count-text" class="text-xs text-zinc-500 mt-0.5">Aguardando consulta</p>
                 </div>
 
                 <!-- Seletor de Registros por Página -->
@@ -278,6 +278,18 @@
                         <!-- Linhas injetadas via JavaScript -->
                     </tbody>
                 </table>
+
+                <!-- Estado Inicial: nenhuma consulta é executada no carregamento da página -->
+                <div id="initial-state" class="py-16 flex flex-col items-center justify-center text-center p-4">
+                    <div class="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-400 mb-3">
+                        <i data-lucide="mouse-pointer-click" class="w-5 h-5"></i>
+                    </div>
+                    <h4 class="text-sm font-medium text-zinc-900">Defina os filtros e clique em Consultar Empresas</h4>
+                    <p class="text-xs text-zinc-500 mt-1 max-w-md">
+                        Os dados são carregados apenas quando você solicitar a consulta — nada é buscado
+                        automaticamente ao abrir a página ou ao alterar os filtros.
+                    </p>
+                </div>
 
                 <!-- Estado Vazio -->
                 <div id="empty-state" class="hidden py-16 flex flex-col items-center justify-center text-center p-4">
@@ -581,9 +593,11 @@
             const spinner = document.getElementById('loading-spinner');
             const tbody = document.getElementById('table-body');
             const emptyState = document.getElementById('empty-state');
+            const initialState = document.getElementById('initial-state');
             const totalText = document.getElementById('total-count-text');
 
             spinner.classList.remove('hidden');
+            initialState.classList.add('hidden');
 
             try {
                 const res = await fetch(`/api/empresas?${params.toString()}`);
@@ -823,23 +837,31 @@
             });
         }
 
+        // Volta a tabela ao estado inicial, sem executar nenhuma consulta
+        function limparResultados() {
+            document.getElementById('table-body').innerHTML = '';
+            document.getElementById('empty-state').classList.add('hidden');
+            document.getElementById('initial-state').classList.remove('hidden');
+            document.getElementById('loading-spinner').classList.add('hidden');
+            document.getElementById('total-count-text').innerText = 'Aguardando consulta';
+            currentPage = 1;
+            currentTotalPages = 1;
+            updatePagination(1, 1, 0);
+        }
+
         // Eventos do Formulário
         document.getElementById('filter-form').addEventListener('submit', e => {
             e.preventDefault();
             fetchEmpresas(1);
         });
 
+        // Limpar apenas zera os filtros e a tabela: a próxima consulta depende do botão Consultar
         document.getElementById('btn-limpar').addEventListener('click', () => {
             document.getElementById('filter-form').reset();
-            fetchEmpresas(1);
+            limparResultados();
         });
 
-        document.getElementById('page-size').addEventListener('change', () => fetchEmpresas(1));
-
-        // Reordena imediatamente ao trocar o critério de ordenação
-        document.getElementById('f-ordenar').addEventListener('change', () => fetchEmpresas(1));
-
-        // Paginação
+        // Paginação (navegação sobre o resultado já carregado)
         document.getElementById('btn-first').addEventListener('click', () => fetchEmpresas(1));
         document.getElementById('btn-prev').addEventListener('click', () => {
             if (currentPage > 1) fetchEmpresas(currentPage - 1);
@@ -873,11 +895,13 @@
             }
         }
 
-        // Inicialização
+        // Inicialização: apenas domínios (UFs/Naturezas) e status são carregados.
+        // Nenhuma consulta de empresas é disparada automaticamente: os resultados só
+        // aparecem quando o usuário clica em "Consultar Empresas".
         document.addEventListener('DOMContentLoaded', () => {
             loadDomains();
             loadStatusAndVersion();
-            fetchEmpresas(1);
+            limparResultados();
         });
     </script>
 </body>
