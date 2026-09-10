@@ -127,6 +127,29 @@ LISTA_UFS = [
     "RO", "RR", "RS", "SC", "SE", "SP", "TO", "EX",
 ]
 
+# --------------------------------------------------------------------------------------------------
+# Ordenação dos Resultados
+# Whitelist rígida (chave da interface -> cláusula SQL) para evitar injeção de SQL via ORDER BY.
+# A "data de criação da empresa" é representada por est.data_inicio_atividade (formato YYYYMMDD),
+# que ordena corretamente de forma lexicográfica. NULLIF trata campos vazios como sem data.
+# --------------------------------------------------------------------------------------------------
+ORDENACAO_PADRAO = "cnpj_asc"
+
+MAPA_ORDENACAO = {
+    "cnpj_asc": "est.cnpj_basico ASC, est.cnpj_ordem ASC",
+    "data_criacao_desc": "NULLIF(est.data_inicio_atividade, '') DESC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
+    "data_criacao_asc": "NULLIF(est.data_inicio_atividade, '') ASC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
+    "razao_social_asc": "emp.razao_social ASC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
+    "razao_social_desc": "emp.razao_social DESC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
+    "capital_social_desc": "emp.capital_social DESC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
+    "capital_social_asc": "emp.capital_social ASC NULLS LAST, est.cnpj_basico ASC, est.cnpj_ordem ASC",
+}
+
+def resolve_ordenacao(ordenar_por):
+    """Traduz a opção de ordenação informada em uma cláusula ORDER BY segura (whitelist)."""
+    chave = str(ordenar_por or "").strip().lower()
+    return MAPA_ORDENACAO.get(chave, MAPA_ORDENACAO[ORDENACAO_PADRAO])
+
 def load_domain_caches():
     """Carrega pequenas tabelas de domínio na memória para aceleração extrema de consultas."""
     conn = None
@@ -304,6 +327,9 @@ def search_empresas(filters, page=1, page_size=25):
 
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
+            # 15. Ordenação dos resultados (ex: por data de criação da empresa)
+            order_sql = resolve_ordenacao(filters.get("ordenar_por", ""))
+
             # Contagem total de registros (com teto para performance se for consulta muito ampla)
             count_query = f"""
                 SELECT COUNT(*) FROM (
@@ -354,7 +380,7 @@ def search_empresas(filters, page=1, page_size=25):
                 INNER JOIN "empresa" emp ON emp.cnpj_basico = est.cnpj_basico
                 LEFT JOIN "simples" sim ON sim.cnpj_basico = est.cnpj_basico
                 {where_sql}
-                ORDER BY est.cnpj_basico ASC, est.cnpj_ordem ASC
+                ORDER BY {order_sql}
                 LIMIT %s OFFSET %s;
             """
             cur.execute(data_query, params + [page_size, offset])

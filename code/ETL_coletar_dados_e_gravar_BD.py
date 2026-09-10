@@ -906,6 +906,7 @@ else:
     CREATE INDEX IF NOT EXISTS estabelecimento_cnpj ON "estabelecimento"("cnpj_basico");
     CREATE INDEX IF NOT EXISTS socios_cnpj ON "socios"("cnpj_basico");
     CREATE INDEX IF NOT EXISTS simples_cnpj ON "simples"("cnpj_basico");
+    CREATE INDEX IF NOT EXISTS estabelecimento_data_inicio_atividade ON "estabelecimento"("data_inicio_atividade");
     """
     cur.execute(indices_sql)
     conn.commit()

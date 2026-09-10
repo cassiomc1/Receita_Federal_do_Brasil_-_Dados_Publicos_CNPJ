@@ -136,6 +136,7 @@ def api_empresas():
         "capital_max": request.args.get("capital_max", ""),
         "data_inicio_de": request.args.get("data_inicio_de", ""),
         "data_inicio_ate": request.args.get("data_inicio_ate", ""),
+        "ordenar_por": request.args.get("ordenar_por", ""),
     }
 
     try:
@@ -178,6 +179,7 @@ def api_exportar_csv():
         "capital_max": request.args.get("capital_max", ""),
         "data_inicio_de": request.args.get("data_inicio_de", ""),
         "data_inicio_ate": request.args.get("data_inicio_ate", ""),
+        "ordenar_por": request.args.get("ordenar_por", ""),
     }
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -215,6 +217,7 @@ def api_exportar_xls():
         "capital_max": request.args.get("capital_max", ""),
         "data_inicio_de": request.args.get("data_inicio_de", ""),
         "data_inicio_ate": request.args.get("data_inicio_ate", ""),
+        "ordenar_por": request.args.get("ordenar_por", ""),
     }
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

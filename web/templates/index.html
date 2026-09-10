@@ -104,8 +104,8 @@
                     </div>
                 </div>
 
-                <!-- Linha 2: Localização e Atividade -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <!-- Linha 2: Localização, Atividade e Ordenação -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                     <div class="space-y-1">
                         <label class="text-xs font-medium text-zinc-700">UF (Estado)</label>
                         <select id="f-uf" class="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
@@ -126,6 +126,21 @@
                             <option value="TODOS">Matriz e Filiais</option>
                             <option value="1">Apenas Matriz</option>
                             <option value="2">Apenas Filiais</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-xs font-medium text-zinc-700 flex items-center gap-1">
+                            <i data-lucide="arrow-up-down" class="w-3 h-3 text-zinc-400"></i>
+                            <span>Ordenar por</span>
+                        </label>
+                        <select id="f-ordenar" class="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-950">
+                            <option value="cnpj_asc">Padrão (CNPJ)</option>
+                            <option value="data_criacao_desc">Data de Criação (mais recentes)</option>
+                            <option value="data_criacao_asc">Data de Criação (mais antigas)</option>
+                            <option value="razao_social_asc">Razão Social (A-Z)</option>
+                            <option value="razao_social_desc">Razão Social (Z-A)</option>
+                            <option value="capital_social_desc">Capital Social (maior)</option>
+                            <option value="capital_social_asc">Capital Social (menor)</option>
                         </select>
                     </div>
                 </div>
@@ -252,6 +267,7 @@
                             <th class="py-3 px-4">Razão Social / Nome Fantasia</th>
                             <th class="py-3 px-4">Tipo</th>
                             <th class="py-3 px-4">Situação</th>
+                            <th class="py-3 px-4">Criação</th>
                             <th class="py-3 px-4">Localização</th>
                             <th class="py-3 px-4">CNAE Principal</th>
                             <th class="py-3 px-4">Porte</th>
@@ -531,6 +547,7 @@
             const capMax = getVal('f-cap-max');
             const dtIni = getVal('f-dt-ini');
             const dtFim = getVal('f-dt-fim');
+            const ordenar = getVal('f-ordenar');
 
             if (cnpj) params.append('cnpj', cnpj);
             if (razao) params.append('razao_social', razao);
@@ -548,6 +565,7 @@
             if (capMax) params.append('capital_max', capMax);
             if (dtIni) params.append('data_inicio_de', dtIni);
             if (dtFim) params.append('data_inicio_ate', dtFim);
+            if (ordenar && ordenar !== 'cnpj_asc') params.append('ordenar_por', ordenar);
 
             return params;
         }
@@ -613,6 +631,9 @@
                         </td>
                         <td class="py-3 px-4 whitespace-nowrap">${tipoBadge}</td>
                         <td class="py-3 px-4 whitespace-nowrap">${situacaoBadge}</td>
+                        <td class="py-3 px-4 whitespace-nowrap">
+                            <span class="text-zinc-600">${emp.data_inicio || '-'}</span>
+                        </td>
                         <td class="py-3 px-4 whitespace-nowrap">
                             <span class="text-zinc-700">${emp.municipio}</span>
                             <span class="text-zinc-400 text-[11px] ml-1">/ ${emp.uf}</span>
@@ -799,6 +820,9 @@
         });
 
         document.getElementById('page-size').addEventListener('change', () => fetchEmpresas(1));
+
+        // Reordena imediatamente ao trocar o critério de ordenação
+        document.getElementById('f-ordenar').addEventListener('change', () => fetchEmpresas(1));
 
         // Paginação
         document.getElementById('btn-first').addEventListener('click', () => fetchEmpresas(1));
