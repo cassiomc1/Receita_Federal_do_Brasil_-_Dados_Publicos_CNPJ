@@ -134,10 +134,40 @@ elif [[ -f "/home/opc/Receita_Federal_do_Brasil_-_Dados_Publicos_CNPJ/venv/bin/a
     source "/home/opc/Receita_Federal_do_Brasil_-_Dados_Publicos_CNPJ/venv/bin/activate"
 fi
 
-# Detecta interpretador Python
-PYTHON_EXEC="python3"
-if ! command -v python3 &>/dev/null && command -v python3.11 &>/dev/null; then
-    PYTHON_EXEC="python3.11"
+# Detecta o interpretador Python 3 e, se não houver nenhum, tenta instalar via DNF.
+# Sem esta etapa o script morria com "No such file or directory" antes de qualquer verificação.
+detecta_python() {
+    if command -v python3 &>/dev/null; then
+        PYTHON_EXEC="python3"
+    elif command -v python3.11 &>/dev/null; then
+        PYTHON_EXEC="python3.11"
+    else
+        PYTHON_EXEC=""
+    fi
+}
+
+instala_python() {
+    command -v dnf &>/dev/null || return 0
+    log_warn "Nenhum interpretador Python 3 encontrado no sistema."
+    log_info "Instalando Python 3 e pip via DNF (Oracle Linux 9)..."
+    if [[ $EUID -eq 0 ]]; then
+        dnf install -y python3 python3-pip 2>/dev/null || true
+    elif command -v sudo &>/dev/null; then
+        sudo dnf install -y python3 python3-pip 2>/dev/null || true
+    fi
+}
+
+PYTHON_EXEC=""
+detecta_python
+if [[ -z "$PYTHON_EXEC" ]]; then
+    instala_python
+    detecta_python
+fi
+
+if [[ -z "$PYTHON_EXEC" ]]; then
+    log_error "Python 3 não está instalado e não foi possível instalá-lo automaticamente."
+    log_info "Instale manualmente e execute novamente: sudo dnf install -y python3 python3-pip"
+    exit 1
 fi
 
 # Módulos exigidos pelo servidor web (sem eles a aplicação não inicia)
@@ -145,9 +175,10 @@ DEPS_OBRIGATORIAS="flask psycopg2 dotenv"
 # Módulos opcionais: a ausência não impede o servidor de subir, apenas desabilita um recurso
 DEPS_OPCIONAIS="openpyxl requests"
 
-# Imprime os módulos ausentes dentre os nomes informados (vazio se todos estiverem instalados)
+# Imprime os módulos ausentes dentre os nomes informados (vazio se todos estiverem instalados).
+# Se o interpretador não puder ser executado, considera todos ausentes em vez de abortar o script.
 modulos_ausentes() {
-    $PYTHON_EXEC - "$@" <<'PY'
+    $PYTHON_EXEC - "$@" <<'PY' 2>/dev/null || echo "$*"
 import importlib.util
 import sys
 print(" ".join(nome for nome in sys.argv[1:] if importlib.util.find_spec(nome) is None))

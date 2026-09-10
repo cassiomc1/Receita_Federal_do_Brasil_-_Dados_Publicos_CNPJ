@@ -1301,7 +1301,8 @@ log_title "ETAPA 1: VERIFICANDO PACOTES DO SISTEMA E POSTGRESQL 16"
 
 PACKAGES_ALREADY_INSTALLED=false
 if (rpm -q postgresql16-server &>/dev/null || rpm -q postgresql-server &>/dev/null) && \
-   command -v git &>/dev/null && command -v gcc &>/dev/null && command -v python3 &>/dev/null; then
+   command -v git &>/dev/null && command -v gcc &>/dev/null && \
+   command -v python3 &>/dev/null && python3 -m pip --version &>/dev/null; then
     PACKAGES_ALREADY_INSTALLED=true
     log_info "Pacotes do sistema e PostgreSQL já detectados como instalados. Pulando DNF..."
 fi
@@ -1466,6 +1467,24 @@ if [[ ! -d "$VENV_DIR" ]]; then
     $PYTHON_CMD -m venv "$VENV_DIR"
 else
     log_info "Ambiente virtual já existente em: $VENV_DIR"
+fi
+
+# Garante que o pip exista dentro do ambiente virtual antes de instalar as dependências
+if [[ ! -x "$VENV_DIR/bin/pip" ]]; then
+    log_warn "pip não encontrado no ambiente virtual."
+    if command -v dnf &>/dev/null; then
+        log_info "Instalando python3-pip no sistema..."
+        dnf install -y python3-pip 2>/dev/null || true
+    fi
+    log_info "Recriando o ambiente virtual..."
+    rm -rf "$VENV_DIR"
+    $PYTHON_CMD -m venv "$VENV_DIR" || true
+fi
+
+if [[ ! -x "$VENV_DIR/bin/pip" ]]; then
+    log_error "Não foi possível preparar o pip em $VENV_DIR."
+    log_info "Instale o pip do sistema e execute novamente: sudo dnf install -y python3-pip"
+    exit 1
 fi
 
 DEPENDENCIES_READY=false
