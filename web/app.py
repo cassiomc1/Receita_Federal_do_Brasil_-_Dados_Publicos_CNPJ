@@ -33,6 +33,7 @@ try:
         get_empresa_details,
         generate_csv_stream,
         generate_excel_file,
+        DependenciaAusenteError,
         LISTA_UFS,
         MAPA_SITUACAO,
         MAPA_PORTE,
@@ -61,6 +62,7 @@ except ImportError:
         get_empresa_details,
         generate_csv_stream,
         generate_excel_file,
+        DependenciaAusenteError,
         LISTA_UFS,
         MAPA_SITUACAO,
         MAPA_PORTE,
@@ -75,6 +77,50 @@ except ImportError:
 
 app = Flask(__name__)
 app.secret_key = APP_SECRET_KEY
+
+def _pagina_aviso_exportacao(mensagem):
+    """Página HTML exibida no navegador quando uma exportação está indisponível no servidor."""
+    from html import escape
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exportação indisponível - CNPJ Explorer</title>
+    <style>
+        body {{ font-family: Inter, -apple-system, 'Segoe UI', sans-serif; background: #fafafa;
+               color: #18181b; display: flex; align-items: center; justify-content: center;
+               min-height: 100vh; margin: 0; padding: 24px; }}
+        .card {{ background: #fff; border: 1px solid #e4e4e7; border-radius: 12px; padding: 28px;
+                max-width: 620px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }}
+        h1 {{ font-size: 17px; margin: 0 0 10px; }}
+        p {{ font-size: 13px; line-height: 1.6; color: #3f3f46; margin: 0 0 14px; }}
+        code {{ background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 5px;
+                padding: 2px 6px; font-size: 12px; }}
+        pre {{ background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 8px; padding: 12px;
+               font-size: 12px; overflow-x: auto; margin: 0 0 16px; }}
+        a {{ display: inline-block; background: #18181b; color: #fff; text-decoration: none;
+             padding: 9px 16px; border-radius: 7px; font-size: 13px; font-weight: 500; }}
+        .tag {{ display: inline-block; font-size: 11px; font-weight: 600; color: #b45309;
+                background: #fffbeb; border: 1px solid #fde68a; border-radius: 999px;
+                padding: 2px 10px; margin-bottom: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <span class="tag">Exportação XLS indisponível</span>
+        <h1>O servidor não consegue gerar a planilha Excel</h1>
+        <p>{escape(mensagem)}</p>
+        <p>No servidor, execute:</p>
+        <pre>pip install -r requirements.txt
+# ou apenas o pacote necessário:
+pip install openpyxl</pre>
+        <p>Depois reinicie o servidor. Enquanto isso, use a exportação <strong>CSV</strong>, que não
+           depende desse pacote.</p>
+        <a href="/">Voltar para a consulta</a>
+    </div>
+</body>
+</html>"""
 
 # --------------------------------------------------------------------------------------------------
 # Rotas de Autenticação e Páginas
@@ -229,7 +275,12 @@ def api_exportar_xls():
         ext = "xlsx"
     filename = f"empresas_rfb_export_{timestamp}.{ext}"
 
-    excel_io = generate_excel_file(filters, max_rows=10000)
+    try:
+        excel_io = generate_excel_file(filters, max_rows=10000)
+    except DependenciaAusenteError as e:
+        # Sem o openpyxl a exportação XLS fica indisponível: devolve uma página explicativa
+        # (o download é aberto pelo navegador) em vez de um erro 500 com traceback.
+        return Response(_pagina_aviso_exportacao(str(e)), status=503, mimetype="text/html; charset=utf-8")
 
     mimetype = (
         "application/vnd.ms-excel"

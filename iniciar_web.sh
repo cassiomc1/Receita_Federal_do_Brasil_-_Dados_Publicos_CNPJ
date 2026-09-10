@@ -140,53 +140,93 @@ if ! command -v python3 &>/dev/null && command -v python3.11 &>/dev/null; then
     PYTHON_EXEC="python3.11"
 fi
 
-# Garante que o módulo Flask e dependências web estejam instalados
-if ! $PYTHON_EXEC -c "import flask" &>/dev/null; then
-    log_warn "Módulo 'flask' não encontrado no ambiente Python atual ($($PYTHON_EXEC -V 2>&1))."
+# Módulos exigidos pelo servidor web (sem eles a aplicação não inicia)
+DEPS_OBRIGATORIAS="flask psycopg2 dotenv"
+# Módulos opcionais: a ausência não impede o servidor de subir, apenas desabilita um recurso
+DEPS_OPCIONAIS="openpyxl requests"
+
+# Imprime os módulos ausentes dentre os nomes informados (vazio se todos estiverem instalados)
+modulos_ausentes() {
+    $PYTHON_EXEC - "$@" <<'PY'
+import importlib.util
+import sys
+print(" ".join(nome for nome in sys.argv[1:] if importlib.util.find_spec(nome) is None))
+PY
+}
+
+# Garante que os módulos Flask e demais dependências web estejam instalados.
+# A verificação é feita módulo a módulo: checar apenas o Flask deixava dependências como
+# o openpyxl sem instalar quando o Flask já existia no ambiente.
+FALTANDO="$(modulos_ausentes $DEPS_OBRIGATORIAS $DEPS_OPCIONAIS)"
+
+if [[ -n "$FALTANDO" ]]; then
+    log_warn "Dependências web ausentes no ambiente Python atual ($($PYTHON_EXEC -V 2>&1)): ${FALTANDO}"
     log_info "Instalando dependências web necessárias..."
 
     INSTALLED=false
+    ULTIMO_ERRO=""
 
-    # 1. Se venv existir, usa o pip do venv
-    if [[ -f "${SCRIPT_DIR}/venv/bin/pip" ]]; then
-        if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
-            "${SCRIPT_DIR}/venv/bin/pip" install -r "${SCRIPT_DIR}/requirements.txt" --quiet && INSTALLED=true || true
-        else
-            "${SCRIPT_DIR}/venv/bin/pip" install flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet && INSTALLED=true || true
-        fi
+    # Instala o requirements.txt quando disponível; senão, os pacotes individualmente
+    if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
+        PACOTES=(-r "${SCRIPT_DIR}/requirements.txt")
+    else
+        PACOTES=(flask psycopg2-binary SQLAlchemy python-dotenv openpyxl requests)
     fi
 
-    # 2. Se pip estiver no PATH (venv ativo ou sistema)
+    # A ordem importa: prioriza o pip do próprio interpretador que executará a aplicação.
+    # Usar um 'pip' genérico do PATH pode instalar em OUTRO Python e deixar a aplicação sem o
+    # módulo — foi a causa do erro "No module named 'openpyxl'" com o pacote já "instalado".
+    if [[ -x "${SCRIPT_DIR}/venv/bin/pip" ]]; then
+        ULTIMO_ERRO="$("${SCRIPT_DIR}/venv/bin/pip" install "${PACOTES[@]}" --quiet 2>&1)" && INSTALLED=true || true
+    fi
+
+    if [ "$INSTALLED" = false ]; then
+        ULTIMO_ERRO="$($PYTHON_EXEC -m pip install "${PACOTES[@]}" --quiet 2>&1)" && INSTALLED=true || true
+    fi
+
     if [ "$INSTALLED" = false ]; then
         if command -v pip &>/dev/null; then
-            pip install flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || \
-            pip install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || true
+            ULTIMO_ERRO="$(pip install "${PACOTES[@]}" --quiet 2>&1)" && INSTALLED=true || \
+            ULTIMO_ERRO="$(pip install "${PACOTES[@]}" --break-system-packages --quiet 2>&1)" && INSTALLED=true || true
         elif command -v pip3 &>/dev/null; then
-            pip3 install flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || \
-            pip3 install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || true
-        else
-            $PYTHON_EXEC -m pip install flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || \
-            $PYTHON_EXEC -m pip install --break-system-packages flask psycopg2-binary SQLAlchemy python-dotenv openpyxl --quiet 2>/dev/null && INSTALLED=true || true
+            ULTIMO_ERRO="$(pip3 install "${PACOTES[@]}" --quiet 2>&1)" && INSTALLED=true || \
+            ULTIMO_ERRO="$(pip3 install "${PACOTES[@]}" --break-system-packages --quiet 2>&1)" && INSTALLED=true || true
         fi
     fi
 
-    # 3. Fallback DNF no Oracle Linux 9 se pip não estava instalado
-    if ! $PYTHON_EXEC -c "import flask" &>/dev/null && command -v dnf &>/dev/null; then
+    # Fallback DNF no Oracle Linux 9 se o pip não estava disponível
+    if [ "$INSTALLED" = false ] && ! $PYTHON_EXEC -m pip --version &>/dev/null && command -v dnf &>/dev/null; then
         log_info "Tentando instalação via gerenciador de pacotes DNF (Oracle Linux 9)..."
         if [[ $EUID -eq 0 ]]; then
             dnf install -y python3-pip python3-flask 2>/dev/null || true
         elif command -v sudo &>/dev/null; then
             sudo dnf install -y python3-pip python3-flask 2>/dev/null || true
         fi
+        ULTIMO_ERRO="$($PYTHON_EXEC -m pip install "${PACOTES[@]}" --quiet 2>&1)" && INSTALLED=true || true
     fi
 
-    if $PYTHON_EXEC -c "import flask" &>/dev/null; then
-        log_success "Dependências web instaladas com sucesso!"
-    else
-        log_error "Não foi possível instalar o Flask automaticamente."
-        log_info "Execute manualmente: pip install flask (ou dnf install -y python3-pip && pip install flask)"
+    FALTANDO_OBRIGATORIAS="$(modulos_ausentes $DEPS_OBRIGATORIAS)"
+    if [[ -n "$FALTANDO_OBRIGATORIAS" ]]; then
+        log_error "Não foi possível instalar os módulos obrigatórios: ${FALTANDO_OBRIGATORIAS}"
+        if [[ -n "$ULTIMO_ERRO" ]]; then
+            log_info "Última saída do pip:"
+            echo "$ULTIMO_ERRO" | tail -5
+        fi
+        log_info "Execute manualmente: $PYTHON_EXEC -m pip install -r requirements.txt"
         exit 1
     fi
+
+    # Módulos opcionais ausentes não impedem o servidor de subir: apenas avisam qual recurso fica indisponível
+    if [[ -n "$(modulos_ausentes openpyxl)" ]]; then
+        log_warn "Módulo 'openpyxl' não instalado: a exportação para Excel (XLS) ficará indisponível."
+        log_info "Para habilitar: $PYTHON_EXEC -m pip install openpyxl"
+    fi
+    if [[ -n "$(modulos_ausentes requests)" ]]; then
+        log_warn "Módulo 'requests' não instalado: a verificação de nova base da RFB ficará indisponível."
+        log_info "Para habilitar: $PYTHON_EXEC -m pip install requests"
+    fi
+
+    log_success "Dependências web verificadas com sucesso!"
 fi
 
 # Inicia o aplicativo Flask

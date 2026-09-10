@@ -98,6 +98,7 @@ tqdm>=4.66.0
 certifi>=2024.2.2
 urllib3>=2.0.0
 flask>=3.0.0
+openpyxl>=3.1.0
 EOF
     log_success "requirements.txt criado com sucesso."
 fi
