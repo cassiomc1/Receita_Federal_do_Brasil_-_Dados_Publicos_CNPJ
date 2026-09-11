@@ -9,6 +9,7 @@ import csv
 import io
 import os
 import pathlib
+import re
 import unicodedata
 import psycopg2
 from psycopg2 import pool
@@ -223,6 +224,50 @@ def _normalizar_nome_municipio(texto):
     s = "".join(c for c in s if unicodedata.category(c) != "Mn")
     return " ".join(s.lower().strip().split())
 
+def _escape_like(texto):
+    """Escapa os curingas do LIKE (%, _ e barra invertida) no texto do usuário.
+
+    Sem isso, buscar "100% SEGURO" trataria o % como curinga e traria resultados
+    de outras empresas (mesma classe de defeito do filtro de município).
+    Usar sempre em conjunto com "ESCAPE '\\'" na cláusula SQL.
+    """
+    return str(texto).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+def _parse_int_filtro(valor):
+    """Converte filtro numérico de select em int; devolve None se vazio/inválido.
+
+    Evita que um valor inesperado (ex: "abc" via URL manipulada) derrube a
+    consulta inteira com ValueError — o filtro inválido é apenas ignorado.
+    """
+    try:
+        texto = str(valor or "").strip()
+    except Exception:
+        return None
+    if not texto or texto.upper() == "TODOS":
+        return None
+    try:
+        return int(texto)
+    except (TypeError, ValueError):
+        return None
+
+def _parse_valor_monetario(valor):
+    """Converte valor de capital em float; aceita "1000.50" e "1.000,50" (BR).
+
+    Devolve None se vazio/inválido. A cláusula SQL só é adicionada quando o
+    parse tem sucesso — no comportamento antigo a cláusula era adicionada antes
+    do float(), e um valor inválido gerava cláusula sem parâmetro, quebrando a
+    consulta inteira por divergência de placeholders.
+    """
+    s = str(valor or "").strip().replace("R$", "").replace(" ", "")
+    if not s:
+        return None
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
 def _build_where_sql(filters):
     """Monta o WHERE parametrizado compartilhado entre busca paginada e exportações.
 
@@ -232,10 +277,11 @@ def _build_where_sql(filters):
     where_clauses = []
     params = []
 
-    # 1. Filtro de CNPJ
+    # 1. Filtro de CNPJ (remove tudo que não é dígito: pontos, barras, traços e espaços
+    # de valores colados, ex: "00.000.000 / 0001-00").
     cnpj_raw = (filters.get("cnpj", "") or "").strip()
     if cnpj_raw:
-        cnpj_clean = cnpj_raw.replace(".", "").replace("/", "").replace("-", "")
+        cnpj_clean = re.sub(r"\D", "", cnpj_raw)
         if len(cnpj_clean) == 14:
             where_clauses.append("(est.cnpj_basico = %s AND est.cnpj_ordem = %s AND est.cnpj_dv = %s)")
             params.extend([cnpj_clean[:8], cnpj_clean[8:12], cnpj_clean[12:14]])
@@ -249,14 +295,14 @@ def _build_where_sql(filters):
     # 2. Razão Social
     razao_social = (filters.get("razao_social", "") or "").strip()
     if razao_social:
-        where_clauses.append("emp.razao_social ILIKE %s")
-        params.append(f"%{razao_social}%")
+        where_clauses.append("emp.razao_social ILIKE %s ESCAPE '\\'")
+        params.append(f"%{_escape_like(razao_social)}%")
 
     # 3. Nome Fantasia
     nome_fantasia = (filters.get("nome_fantasia", "") or "").strip()
     if nome_fantasia:
-        where_clauses.append("est.nome_fantasia ILIKE %s")
-        params.append(f"%{nome_fantasia}%")
+        where_clauses.append("est.nome_fantasia ILIKE %s ESCAPE '\\'")
+        params.append(f"%{_escape_like(nome_fantasia)}%")
 
     # 4. UF
     uf = (filters.get("uf", "") or "").strip().upper()
@@ -312,43 +358,58 @@ def _build_where_sql(filters):
                 where_clauses.append(
                     "(est.municipio::text IN ("
                     'SELECT "codigo"::text FROM "munic" '
-                    'WHERE "descricao" ILIKE %s OR "descricao" ILIKE %s'
+                    'WHERE "descricao" ILIKE %s ESCAPE \'\\\' OR "descricao" ILIKE %s ESCAPE \'\\\''
                     "))"
                 )
-                params.extend([f"%{municipio}%", f"%{nome_norm}%"])
+                params.extend([f"%{_escape_like(municipio)}%", f"%{_escape_like(nome_norm)}%"])
 
     # 6. Situação Cadastral
-    situacao = (filters.get("situacao_cadastral", "") or "").strip()
-    if situacao and situacao != "TODOS":
+    situacao = _parse_int_filtro(filters.get("situacao_cadastral", ""))
+    if situacao is not None:
         where_clauses.append("est.situacao_cadastral = %s")
-        params.append(int(situacao))
+        params.append(situacao)
 
     # 7. Tipo Matriz / Filial
-    tipo_matriz = (filters.get("matriz_filial", "") or "").strip()
-    if tipo_matriz and tipo_matriz != "TODOS":
+    tipo_matriz = _parse_int_filtro(filters.get("matriz_filial", ""))
+    if tipo_matriz is not None:
         where_clauses.append("est.identificador_matriz_filial = %s")
-        params.append(int(tipo_matriz))
+        params.append(tipo_matriz)
 
     # 8. Porte da Empresa
-    porte = (filters.get("porte_empresa", "") or "").strip()
-    if porte and porte != "TODOS":
+    porte = _parse_int_filtro(filters.get("porte_empresa", ""))
+    if porte is not None:
         where_clauses.append("emp.porte_empresa = %s")
-        params.append(int(porte))
+        params.append(porte)
 
-    # 9. CNAE Principal
+    # 9. CNAE Principal (código ou descrição, como sugere o placeholder da interface).
     # A coluna pode ser INTEGER (schema gerado pelo to_sql do ETL) ou VARCHAR (DDL).
     # A conversão para texto com lpad mantém o filtro funcionando nos dois formatos e
     # preserva os zeros à esquerda dos códigos CNAE (ex: 0111301).
-    cnae = (filters.get("cnae", "") or "").strip().replace("-", "").replace("/", "")
+    cnae = (
+        (filters.get("cnae", "") or "").strip()
+        .replace("-", "").replace("/", "").replace(".", "").replace(" ", "")
+    )
     if cnae:
-        where_clauses.append("lpad(est.cnae_fiscal_principal::text, 7, '0') LIKE %s")
-        params.append(f"{cnae}%")
+        if cnae.isdigit():
+            where_clauses.append("lpad(est.cnae_fiscal_principal::text, 7, '0') LIKE %s ESCAPE '\\'")
+            params.append(f"{_escape_like(cnae)}%")
+        else:
+            # Busca por descrição na tabela de domínio (ex: "desenvolvimento").
+            # Se o texto não existir, a subconsulta retorna vazio (0 resultados)
+            # em vez de ignorar o filtro.
+            where_clauses.append(
+                "(lpad(est.cnae_fiscal_principal::text, 7, '0') IN ("
+                'SELECT lpad("codigo"::text, 7, \'0\') FROM "cnae" '
+                'WHERE "descricao" ILIKE %s ESCAPE \'\\\''
+                "))"
+            )
+            params.append(f"%{_escape_like(cnae)}%")
 
     # 10. Natureza Jurídica
-    natju = (filters.get("natureza_juridica", "") or "").strip()
-    if natju and natju != "TODOS":
+    natju = _parse_int_filtro(filters.get("natureza_juridica", ""))
+    if natju is not None:
         where_clauses.append("emp.natureza_juridica = %s")
-        params.append(int(natju))
+        params.append(natju)
 
     # 11. Opção Simples Nacional
     simples = (filters.get("opcao_simples", "") or "").strip().upper()
@@ -364,33 +425,36 @@ def _build_where_sql(filters):
     elif mei in ("N", "NAO", "NÃO"):
         where_clauses.append("(sim.opcao_mei IS NULL OR sim.opcao_mei IN ('N', 'NAO'))")
 
-    # 13. Faixa de Capital Social
-    cap_min = (filters.get("capital_min", "") or "").strip()
-    if cap_min:
-        try:
-            where_clauses.append("emp.capital_social >= %s")
-            params.append(float(cap_min))
-        except ValueError:
-            pass
+    # 13. Faixa de Capital Social (aceita "1000.50" e "1.000,50").
+    cap_min = _parse_valor_monetario(filters.get("capital_min", ""))
+    if cap_min is not None:
+        where_clauses.append("emp.capital_social >= %s")
+        params.append(cap_min)
 
-    cap_max = (filters.get("capital_max", "") or "").strip()
-    if cap_max:
-        try:
-            where_clauses.append("emp.capital_social <= %s")
-            params.append(float(cap_max))
-        except ValueError:
-            pass
+    cap_max = _parse_valor_monetario(filters.get("capital_max", ""))
+    if cap_max is not None:
+        where_clauses.append("emp.capital_social <= %s")
+        params.append(cap_max)
 
-    # 14. Data de Início de Atividade
+    # 14. Data de Início de Atividade (exige só dígitos após remover separadores).
+    # Sem a validação, um valor como "abc" gerava erro de SQL na coluna INTEGER do
+    # ETL — ou, pior, na coluna VARCHAR o filtro "até" (`<= 'abc'`) casava com todas
+    # as datas e trazia resultados fora do período.
     # A comparação com o literal YYYYMMDD funciona nos dois schemas (coluna INTEGER do
     # ETL ou VARCHAR do DDL), pois o PostgreSQL converte o parâmetro para o tipo da coluna.
-    dt_ini = (filters.get("data_inicio_de", "") or "").strip().replace("-", "").replace("/", "")
-    if dt_ini:
+    dt_ini = (
+        (filters.get("data_inicio_de", "") or "").strip()
+        .replace("-", "").replace("/", "").replace(" ", "")
+    )
+    if dt_ini and dt_ini.isdigit():
         where_clauses.append("est.data_inicio_atividade >= %s")
         params.append(dt_ini)
 
-    dt_fim = (filters.get("data_inicio_ate", "") or "").strip().replace("-", "").replace("/", "")
-    if dt_fim:
+    dt_fim = (
+        (filters.get("data_inicio_ate", "") or "").strip()
+        .replace("-", "").replace("/", "").replace(" ", "")
+    )
+    if dt_fim and dt_fim.isdigit():
         where_clauses.append("est.data_inicio_atividade <= %s")
         # Em colunas VARCHAR um registro sem data ("") casaria com "" <= "20211231";
         # o predicado abaixo garante que apenas empresas com data preenchida retornem.
