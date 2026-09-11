@@ -6,6 +6,7 @@ autenticação com senha gerada a cada inicialização, consultas avançadas e e
 """
 
 import argparse
+import os
 import pathlib
 import sys
 from datetime import datetime
@@ -208,7 +209,10 @@ def api_empresa_detalhes(cnpj_basico):
 @app.route("/api/exportar-csv", methods=["GET"])
 @login_required
 def api_exportar_csv():
-    """Exporta a listagem atual filtrada diretamente em formato CSV para download."""
+    """Exporta o TOTAL filtrado diretamente em formato CSV para download.
+
+    Se "Limitar Resultados" = 1000, exporta até 1000 linhas; sem limite, até 10000.
+    """
     filters = {
         "cnpj": request.args.get("cnpj", ""),
         "razao_social": request.args.get("razao_social", ""),
@@ -247,7 +251,10 @@ def api_exportar_csv():
 @app.route("/api/exportar-excel", methods=["GET"])
 @login_required
 def api_exportar_xls():
-    """Exporta a listagem atual filtrada diretamente em planilha Excel (XLS/XLSX) para download."""
+    """Exporta o TOTAL filtrado diretamente em planilha Excel (XLS/XLSX) para download.
+
+    Se "Limitar Resultados" = 1000, exporta até 1000 linhas; sem limite, até 10000.
+    """
     filters = {
         "cnpj": request.args.get("cnpj", ""),
         "razao_social": request.args.get("razao_social", ""),

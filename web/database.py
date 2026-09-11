@@ -165,6 +165,36 @@ def resolve_ordenacao(ordenar_por):
 # --------------------------------------------------------------------------------------------------
 LIMITE_MAXIMO = 10000
 
+# Tamanho do lote usado para buscar as linhas da exportação (CSV/XLS) sem estourar memória.
+EXPORT_BATCH_SIZE = 1000
+
+EXPORT_SELECT_COLS = """
+    est.cnpj_basico,
+    est.cnpj_ordem,
+    est.cnpj_dv,
+    emp.razao_social,
+    est.nome_fantasia,
+    est.situacao_cadastral,
+    est.data_situacao_cadastral,
+    est.data_inicio_atividade,
+    est.cnae_fiscal_principal,
+    est.uf,
+    est.municipio,
+    est.identificador_matriz_filial,
+    emp.porte_empresa,
+    emp.capital_social,
+    emp.natureza_juridica,
+    sim.opcao_pelo_simples,
+    sim.opcao_mei,
+    est.logradouro,
+    est.numero,
+    est.bairro,
+    est.cep,
+    est.ddd_1,
+    est.telefone_1,
+    est.correio_eletronico
+"""
+
 def resolve_limite(valor, maximo=LIMITE_MAXIMO):
     """Converte o limite informado em inteiro positivo; devolve None se vazio ou inválido."""
     texto = str(valor or "").strip()
@@ -177,6 +207,194 @@ def resolve_limite(valor, maximo=LIMITE_MAXIMO):
     if numero <= 0:
         return None
     return min(numero, maximo)
+
+def _build_where_sql(filters):
+    """Monta o WHERE parametrizado compartilhado entre busca paginada e exportações.
+
+    Retorna (where_sql, params). Mantém exatamente os mesmos filtros da consulta,
+    garantindo que a exportação contenha o mesmo conjunto de resultados exibido na tela.
+    """
+    where_clauses = []
+    params = []
+
+    # 1. Filtro de CNPJ
+    cnpj_raw = (filters.get("cnpj", "") or "").strip()
+    if cnpj_raw:
+        cnpj_clean = cnpj_raw.replace(".", "").replace("/", "").replace("-", "")
+        if len(cnpj_clean) == 14:
+            where_clauses.append("(est.cnpj_basico = %s AND est.cnpj_ordem = %s AND est.cnpj_dv = %s)")
+            params.extend([cnpj_clean[:8], cnpj_clean[8:12], cnpj_clean[12:14]])
+        elif len(cnpj_clean) == 8:
+            where_clauses.append("est.cnpj_basico = %s")
+            params.append(cnpj_clean)
+        else:
+            where_clauses.append("est.cnpj_basico LIKE %s")
+            params.append(f"{cnpj_clean}%")
+
+    # 2. Razão Social
+    razao_social = (filters.get("razao_social", "") or "").strip()
+    if razao_social:
+        where_clauses.append("emp.razao_social ILIKE %s")
+        params.append(f"%{razao_social}%")
+
+    # 3. Nome Fantasia
+    nome_fantasia = (filters.get("nome_fantasia", "") or "").strip()
+    if nome_fantasia:
+        where_clauses.append("est.nome_fantasia ILIKE %s")
+        params.append(f"%{nome_fantasia}%")
+
+    # 4. UF
+    uf = (filters.get("uf", "") or "").strip().upper()
+    if uf and uf != "TODOS":
+        where_clauses.append("est.uf = %s")
+        params.append(uf)
+
+    # 5. Município
+    municipio = (filters.get("municipio", "") or "").strip()
+    if municipio:
+        if municipio.isdigit():
+            where_clauses.append("est.municipio = %s")
+            params.append(int(municipio))
+        else:
+            # Tenta localizar código no cache de municípios
+            codigos = [k for k, v in CACHE_DOMINIOS["munic"].items() if municipio.lower() in v.lower()]
+            if codigos:
+                where_clauses.append("est.municipio = ANY(%s)")
+                params.append([int(c) for c in codigos[:50] if c.isdigit()])
+
+    # 6. Situação Cadastral
+    situacao = (filters.get("situacao_cadastral", "") or "").strip()
+    if situacao and situacao != "TODOS":
+        where_clauses.append("est.situacao_cadastral = %s")
+        params.append(int(situacao))
+
+    # 7. Tipo Matriz / Filial
+    tipo_matriz = (filters.get("matriz_filial", "") or "").strip()
+    if tipo_matriz and tipo_matriz != "TODOS":
+        where_clauses.append("est.identificador_matriz_filial = %s")
+        params.append(int(tipo_matriz))
+
+    # 8. Porte da Empresa
+    porte = (filters.get("porte_empresa", "") or "").strip()
+    if porte and porte != "TODOS":
+        where_clauses.append("emp.porte_empresa = %s")
+        params.append(int(porte))
+
+    # 9. CNAE Principal
+    # A coluna pode ser INTEGER (schema gerado pelo to_sql do ETL) ou VARCHAR (DDL).
+    # A conversão para texto com lpad mantém o filtro funcionando nos dois formatos e
+    # preserva os zeros à esquerda dos códigos CNAE (ex: 0111301).
+    cnae = (filters.get("cnae", "") or "").strip().replace("-", "").replace("/", "")
+    if cnae:
+        where_clauses.append("lpad(est.cnae_fiscal_principal::text, 7, '0') LIKE %s")
+        params.append(f"{cnae}%")
+
+    # 10. Natureza Jurídica
+    natju = (filters.get("natureza_juridica", "") or "").strip()
+    if natju and natju != "TODOS":
+        where_clauses.append("emp.natureza_juridica = %s")
+        params.append(int(natju))
+
+    # 11. Opção Simples Nacional
+    simples = (filters.get("opcao_simples", "") or "").strip().upper()
+    if simples in ("S", "SIM"):
+        where_clauses.append("sim.opcao_pelo_simples IN ('S', 'SIM')")
+    elif simples in ("N", "NAO", "NÃO"):
+        where_clauses.append("(sim.opcao_pelo_simples IS NULL OR sim.opcao_pelo_simples IN ('N', 'NAO'))")
+
+    # 12. Opção MEI
+    mei = (filters.get("opcao_mei", "") or "").strip().upper()
+    if mei in ("S", "SIM"):
+        where_clauses.append("sim.opcao_mei IN ('S', 'SIM')")
+    elif mei in ("N", "NAO", "NÃO"):
+        where_clauses.append("(sim.opcao_mei IS NULL OR sim.opcao_mei IN ('N', 'NAO'))")
+
+    # 13. Faixa de Capital Social
+    cap_min = (filters.get("capital_min", "") or "").strip()
+    if cap_min:
+        try:
+            where_clauses.append("emp.capital_social >= %s")
+            params.append(float(cap_min))
+        except ValueError:
+            pass
+
+    cap_max = (filters.get("capital_max", "") or "").strip()
+    if cap_max:
+        try:
+            where_clauses.append("emp.capital_social <= %s")
+            params.append(float(cap_max))
+        except ValueError:
+            pass
+
+    # 14. Data de Início de Atividade
+    # A comparação com o literal YYYYMMDD funciona nos dois schemas (coluna INTEGER do
+    # ETL ou VARCHAR do DDL), pois o PostgreSQL converte o parâmetro para o tipo da coluna.
+    dt_ini = (filters.get("data_inicio_de", "") or "").strip().replace("-", "").replace("/", "")
+    if dt_ini:
+        where_clauses.append("est.data_inicio_atividade >= %s")
+        params.append(dt_ini)
+
+    dt_fim = (filters.get("data_inicio_ate", "") or "").strip().replace("-", "").replace("/", "")
+    if dt_fim:
+        where_clauses.append("est.data_inicio_atividade <= %s")
+        # Em colunas VARCHAR um registro sem data ("") casaria com "" <= "20211231";
+        # o predicado abaixo garante que apenas empresas com data preenchida retornem.
+        where_clauses.append("(est.data_inicio_atividade::text <> '')")
+        params.append(dt_fim)
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    return where_sql, params
+
+def _format_export_row(r):
+    """Formata uma linha bruta do SELECT de exportação no mesmo padrão da busca paginada."""
+    cnae_cod = format_codigo(r[8], 7)
+    cnae_desc = CACHE_DOMINIOS["cnae"].get(cnae_cod, "")
+    munic_cod = str(r[10] or "")
+    munic_nome = CACHE_DOMINIOS["munic"].get(munic_cod, "")
+    natju_cod = str(r[14] or "")
+    natju_desc = CACHE_DOMINIOS["natju"].get(natju_cod, "")
+    return {
+        "cnpj": format_cnpj(r[0], r[1], r[2]),
+        "cnpj_basico": r[0],
+        "cnpj_ordem": r[1],
+        "cnpj_dv": r[2],
+        "razao_social": r[3] or "",
+        "nome_fantasia": r[4] or "",
+        "situacao_cadastral": MAPA_SITUACAO.get(r[5], f"Código {r[5]}"),
+        "situacao_cod": r[5],
+        "data_situacao": format_date(r[6]),
+        "data_inicio": format_date(r[7]),
+        "cnae_codigo": cnae_cod,
+        "cnae_descricao": cnae_desc,
+        "uf": r[9] or "",
+        "municipio": munic_nome or munic_cod,
+        "tipo": MAPA_MATRIZ_FILIAL.get(r[11], "Desconhecido"),
+        "porte": MAPA_PORTE.get(r[12], "Demais"),
+        "capital_social": format_currency(r[13]),
+        "natureza_juridica": natju_desc or natju_cod,
+        "simples": "Sim" if r[15] in ("S", "SIM") else "Não",
+        "mei": "Sim" if r[16] in ("S", "SIM") else "Não",
+        "endereco_resumo": f"{r[17] or ''}, {r[18] or ''} - {r[19] or ''}, {r[9] or ''}",
+        "telefone": f"({r[21]}) {r[22]}" if r[21] and r[22] else "",
+        "email": r[23] or "",
+    }
+
+def _resolve_total_exportacao(filters, max_rows=10000):
+    """Define quantas linhas a exportação deve gerar.
+
+    - Se o usuário preencheu "Limitar Resultados" (ex: 1000), exporta exatamente esse total
+      (ou menos, caso a consulta retorne menos registros).
+    - Sem limite preenchido, exporta até max_rows (padrão 10000), que representa o total
+      exibido quando a consulta é ampla.
+    """
+    limite = resolve_limite((filters or {}).get("limite", ""))
+    if limite:
+        return limite
+    try:
+        total = int(max_rows)
+    except (TypeError, ValueError):
+        total = LIMITE_MAXIMO
+    return max(1, min(total, LIMITE_MAXIMO))
 
 def load_domain_caches():
     """Carrega pequenas tabelas de domínio na memória para aceleração extrema de consultas."""
@@ -243,137 +461,10 @@ def search_empresas(filters, page=1, page_size=25):
     """
     conn = None
     try:
+        filters = filters or {}
         conn = get_connection()
         with conn.cursor() as cur:
-            where_clauses = []
-            params = []
-
-            # 1. Filtro de CNPJ
-            cnpj_raw = filters.get("cnpj", "").strip()
-            if cnpj_raw:
-                cnpj_clean = cnpj_raw.replace(".", "").replace("/", "").replace("-", "")
-                if len(cnpj_clean) == 14:
-                    where_clauses.append("(est.cnpj_basico = %s AND est.cnpj_ordem = %s AND est.cnpj_dv = %s)")
-                    params.extend([cnpj_clean[:8], cnpj_clean[8:12], cnpj_clean[12:14]])
-                elif len(cnpj_clean) == 8:
-                    where_clauses.append("est.cnpj_basico = %s")
-                    params.append(cnpj_clean)
-                else:
-                    where_clauses.append("est.cnpj_basico LIKE %s")
-                    params.append(f"{cnpj_clean}%")
-
-            # 2. Razão Social
-            razao_social = filters.get("razao_social", "").strip()
-            if razao_social:
-                where_clauses.append("emp.razao_social ILIKE %s")
-                params.append(f"%{razao_social}%")
-
-            # 3. Nome Fantasia
-            nome_fantasia = filters.get("nome_fantasia", "").strip()
-            if nome_fantasia:
-                where_clauses.append("est.nome_fantasia ILIKE %s")
-                params.append(f"%{nome_fantasia}%")
-
-            # 4. UF
-            uf = filters.get("uf", "").strip().upper()
-            if uf and uf != "TODOS":
-                where_clauses.append("est.uf = %s")
-                params.append(uf)
-
-            # 5. Município
-            municipio = filters.get("municipio", "").strip()
-            if municipio:
-                if municipio.isdigit():
-                    where_clauses.append("est.municipio = %s")
-                    params.append(int(municipio))
-                else:
-                    # Tenta localizar código no cache de municípios
-                    codigos = [k for k, v in CACHE_DOMINIOS["munic"].items() if municipio.lower() in v.lower()]
-                    if codigos:
-                        where_clauses.append("est.municipio = ANY(%s)")
-                        params.append([int(c) for c in codigos[:50] if c.isdigit()])
-
-            # 6. Situação Cadastral
-            situacao = filters.get("situacao_cadastral", "").strip()
-            if situacao and situacao != "TODOS":
-                where_clauses.append("est.situacao_cadastral = %s")
-                params.append(int(situacao))
-
-            # 7. Tipo Matriz / Filial
-            tipo_matriz = filters.get("matriz_filial", "").strip()
-            if tipo_matriz and tipo_matriz != "TODOS":
-                where_clauses.append("est.identificador_matriz_filial = %s")
-                params.append(int(tipo_matriz))
-
-            # 8. Porte da Empresa
-            porte = filters.get("porte_empresa", "").strip()
-            if porte and porte != "TODOS":
-                where_clauses.append("emp.porte_empresa = %s")
-                params.append(int(porte))
-
-            # 9. CNAE Principal
-            # A coluna pode ser INTEGER (schema gerado pelo to_sql do ETL) ou VARCHAR (DDL).
-            # A conversão para texto com lpad mantém o filtro funcionando nos dois formatos e
-            # preserva os zeros à esquerda dos códigos CNAE (ex: 0111301).
-            cnae = filters.get("cnae", "").strip().replace("-", "").replace("/", "")
-            if cnae:
-                where_clauses.append("lpad(est.cnae_fiscal_principal::text, 7, '0') LIKE %s")
-                params.append(f"{cnae}%")
-
-            # 10. Natureza Jurídica
-            natju = filters.get("natureza_juridica", "").strip()
-            if natju and natju != "TODOS":
-                where_clauses.append("emp.natureza_juridica = %s")
-                params.append(int(natju))
-
-            # 11. Opção Simples Nacional
-            simples = filters.get("opcao_simples", "").strip().upper()
-            if simples in ("S", "SIM"):
-                where_clauses.append("sim.opcao_pelo_simples IN ('S', 'SIM')")
-            elif simples in ("N", "NAO", "NÃO"):
-                where_clauses.append("(sim.opcao_pelo_simples IS NULL OR sim.opcao_pelo_simples IN ('N', 'NAO'))")
-
-            # 12. Opção MEI
-            mei = filters.get("opcao_mei", "").strip().upper()
-            if mei in ("S", "SIM"):
-                where_clauses.append("sim.opcao_mei IN ('S', 'SIM')")
-            elif mei in ("N", "NAO", "NÃO"):
-                where_clauses.append("(sim.opcao_mei IS NULL OR sim.opcao_mei IN ('N', 'NAO'))")
-
-            # 13. Faixa de Capital Social
-            cap_min = filters.get("capital_min", "").strip()
-            if cap_min:
-                try:
-                    where_clauses.append("emp.capital_social >= %s")
-                    params.append(float(cap_min))
-                except ValueError:
-                    pass
-
-            cap_max = filters.get("capital_max", "").strip()
-            if cap_max:
-                try:
-                    where_clauses.append("emp.capital_social <= %s")
-                    params.append(float(cap_max))
-                except ValueError:
-                    pass
-
-            # 14. Data de Início de Atividade
-            # A comparação com o literal YYYYMMDD funciona nos dois schemas (coluna INTEGER do
-            # ETL ou VARCHAR do DDL), pois o PostgreSQL converte o parâmetro para o tipo da coluna.
-            dt_ini = filters.get("data_inicio_de", "").strip().replace("-", "").replace("/", "")
-            if dt_ini:
-                where_clauses.append("est.data_inicio_atividade >= %s")
-                params.append(dt_ini)
-
-            dt_fim = filters.get("data_inicio_ate", "").strip().replace("-", "").replace("/", "")
-            if dt_fim:
-                where_clauses.append("est.data_inicio_atividade <= %s")
-                # Em colunas VARCHAR um registro sem data ("") casaria com "" <= "20211231";
-                # o predicado abaixo garante que apenas empresas com data preenchida retornem.
-                where_clauses.append("(est.data_inicio_atividade::text <> '')")
-                params.append(dt_fim)
-
-            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+            where_sql, params = _build_where_sql(filters)
 
             # 15. Ordenação dos resultados (ex: por data de criação da empresa)
             order_sql = resolve_ordenacao(filters.get("ordenar_por", ""))
@@ -409,33 +500,9 @@ def search_empresas(filters, page=1, page_size=25):
             if limite:
                 page_size_pagina = max(0, min(page_size, limite - offset))
 
-            # Consulta paginada dos dados
+            # Consulta paginada dos dados (mesmo SELECT/formatação usados na exportação)
             data_query = f"""
-                SELECT
-                    est.cnpj_basico,
-                    est.cnpj_ordem,
-                    est.cnpj_dv,
-                    emp.razao_social,
-                    est.nome_fantasia,
-                    est.situacao_cadastral,
-                    est.data_situacao_cadastral,
-                    est.data_inicio_atividade,
-                    est.cnae_fiscal_principal,
-                    est.uf,
-                    est.municipio,
-                    est.identificador_matriz_filial,
-                    emp.porte_empresa,
-                    emp.capital_social,
-                    emp.natureza_juridica,
-                    sim.opcao_pelo_simples,
-                    sim.opcao_mei,
-                    est.logradouro,
-                    est.numero,
-                    est.bairro,
-                    est.cep,
-                    est.ddd_1,
-                    est.telefone_1,
-                    est.correio_eletronico
+                SELECT {EXPORT_SELECT_COLS}
                 FROM "estabelecimento" est
                 INNER JOIN "empresa" emp ON emp.cnpj_basico = est.cnpj_basico
                 LEFT JOIN "simples" sim ON sim.cnpj_basico = est.cnpj_basico
@@ -446,40 +513,7 @@ def search_empresas(filters, page=1, page_size=25):
             cur.execute(data_query, params + [page_size_pagina, offset])
             rows = cur.fetchall()
 
-            results = []
-            for r in rows:
-                cnae_cod = format_codigo(r[8], 7)
-                cnae_desc = CACHE_DOMINIOS["cnae"].get(cnae_cod, "")
-                munic_cod = str(r[10] or "")
-                munic_nome = CACHE_DOMINIOS["munic"].get(munic_cod, "")
-                natju_cod = str(r[14] or "")
-                natju_desc = CACHE_DOMINIOS["natju"].get(natju_cod, "")
-
-                results.append({
-                    "cnpj": format_cnpj(r[0], r[1], r[2]),
-                    "cnpj_basico": r[0],
-                    "cnpj_ordem": r[1],
-                    "cnpj_dv": r[2],
-                    "razao_social": r[3] or "",
-                    "nome_fantasia": r[4] or "",
-                    "situacao_cadastral": MAPA_SITUACAO.get(r[5], f"Código {r[5]}"),
-                    "situacao_cod": r[5],
-                    "data_situacao": format_date(r[6]),
-                    "data_inicio": format_date(r[7]),
-                    "cnae_codigo": cnae_cod,
-                    "cnae_descricao": cnae_desc,
-                    "uf": r[9] or "",
-                    "municipio": munic_nome or munic_cod,
-                    "tipo": MAPA_MATRIZ_FILIAL.get(r[11], "Desconhecido"),
-                    "porte": MAPA_PORTE.get(r[12], "Demais"),
-                    "capital_social": format_currency(r[13]),
-                    "natureza_juridica": natju_desc or natju_cod,
-                    "simples": "Sim" if r[15] in ("S", "SIM") else "Não",
-                    "mei": "Sim" if r[16] in ("S", "SIM") else "Não",
-                    "endereco_resumo": f"{r[17] or ''}, {r[18] or ''} - {r[19] or ''}, {r[9] or ''}",
-                    "telefone": f"({r[21]}) {r[22]}" if r[21] and r[22] else "",
-                    "email": r[23] or "",
-                })
+            results = [_format_export_row(r) for r in rows]
 
             total_pages = max(1, (total_records + page_size - 1) // page_size)
             is_capped = total_records > 10000
@@ -631,58 +665,109 @@ def get_empresa_details(cnpj_basico):
 # --------------------------------------------------------------------------------------------------
 # Exportação Dinâmica para CSV
 # --------------------------------------------------------------------------------------------------
+EXPORT_HEADERS = [
+    "CNPJ", "Razão Social", "Nome Fantasia", "Tipo", "Situação Cadastral",
+    "Data Situação", "Data Início", "CNAE Código", "CNAE Descrição",
+    "UF", "Município", "Porte", "Capital Social", "Natureza Jurídica",
+    "Simples Nacional", "MEI", "Endereço", "Telefone", "E-mail",
+]
+
+def _item_para_linha_export(item):
+    """Converte o dicionário formatado em linha na ordem das colunas de exportação."""
+    return [
+        item.get("cnpj", ""),
+        item.get("razao_social", ""),
+        item.get("nome_fantasia", ""),
+        item.get("tipo", ""),
+        item.get("situacao_cadastral", ""),
+        item.get("data_situacao", ""),
+        item.get("data_inicio", ""),
+        item.get("cnae_codigo", ""),
+        item.get("cnae_descricao", ""),
+        item.get("uf", ""),
+        item.get("municipio", ""),
+        item.get("porte", ""),
+        item.get("capital_social", ""),
+        item.get("natureza_juridica", ""),
+        item.get("simples", ""),
+        item.get("mei", ""),
+        item.get("endereco_resumo", ""),
+        item.get("telefone", ""),
+        item.get("email", ""),
+    ]
+
 def generate_csv_stream(filters, max_rows=10000):
-    """Gera um fluxo de linhas CSV com UTF-8-BOM e delimitador ';' compatível com Excel."""
-    res = search_empresas(filters, page=1, page_size=max_rows)
-    items = res.get("results", [])
+    """Gera um fluxo de linhas CSV com UTF-8-BOM e delimitador ';' compatível com Excel.
+
+    Exporta o TOTAL de resultados dos filtros (não apenas a página atual):
+    - Se "Limitar Resultados" = 1000, exporta até 1000 linhas;
+    - Sem limite, exporta até max_rows (padrão 10000).
+    A busca é feita em lotes para não estourar a memória com resultados grandes.
+    """
+    filters = filters or {}
+    total_alvo = _resolve_total_exportacao(filters, max_rows=max_rows)
+    where_sql, params_base = _build_where_sql(filters)
+    order_sql = resolve_ordenacao(filters.get("ordenar_por", ""))
 
     output = io.StringIO()
     # Adiciona UTF-8 BOM
     output.write("\ufeff")
     writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
 
-    headers = [
-        "CNPJ", "Razão Social", "Nome Fantasia", "Tipo", "Situação Cadastral",
-        "Data Situação", "Data Início", "CNAE Código", "CNAE Descrição",
-        "UF", "Município", "Porte", "Capital Social", "Natureza Jurídica",
-        "Simples Nacional", "MEI", "Endereço", "Telefone", "E-mail"
-    ]
-    writer.writerow(headers)
+    writer.writerow(EXPORT_HEADERS)
     yield output.getvalue()
     output.seek(0)
     output.truncate(0)
 
-    for item in items:
-        writer.writerow([
-            item["cnpj"],
-            item["razao_social"],
-            item["nome_fantasia"],
-            item["tipo"],
-            item["situacao_cadastral"],
-            item["data_situacao"],
-            item["data_inicio"],
-            item["cnae_codigo"],
-            item["cnae_descricao"],
-            item["uf"],
-            item["municipio"],
-            item["porte"],
-            item["capital_social"],
-            item["natureza_juridica"],
-            item["simples"],
-            item["mei"],
-            item["endereco_resumo"],
-            item["telefone"],
-            item["email"]
-        ])
-        yield output.getvalue()
-        output.seek(0)
-        output.truncate(0)
+    conn = None
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            exportados = 0
+            offset = 0
+            while exportados < total_alvo:
+                lote = min(EXPORT_BATCH_SIZE, total_alvo - exportados)
+                cur.execute(
+                    f"""
+                    SELECT {EXPORT_SELECT_COLS}
+                    FROM "estabelecimento" est
+                    INNER JOIN "empresa" emp ON emp.cnpj_basico = est.cnpj_basico
+                    LEFT JOIN "simples" sim ON sim.cnpj_basico = est.cnpj_basico
+                    {where_sql}
+                    ORDER BY {order_sql}
+                    LIMIT %s OFFSET %s;
+                    """,
+                    params_base + [lote, offset],
+                )
+                rows = cur.fetchall()
+                if not rows:
+                    break
+                for r in rows:
+                    writer.writerow(_item_para_linha_export(_format_export_row(r)))
+                    yield output.getvalue()
+                    output.seek(0)
+                    output.truncate(0)
+                exportados += len(rows)
+                offset += len(rows)
+                if len(rows) < lote:
+                    break
+    except Exception as e:
+        print(f"[Erro Exportação CSV] {e}")
+    finally:
+        if conn:
+            release_connection(conn)
 
 # --------------------------------------------------------------------------------------------------
 # Exportação Direta para Planilha Excel (XLS / XLSX)
 # --------------------------------------------------------------------------------------------------
 def generate_excel_file(filters, max_rows=10000):
-    """Gera uma planilha Excel (.xlsx / .xls) em memória com formatação e estilização profissional."""
+    """Gera uma planilha Excel (.xlsx / .xls) em memória com formatação e estilização profissional.
+
+    Exporta o TOTAL de resultados dos filtros (não apenas a página atual):
+    - Se "Limitar Resultados" = 1000, exporta até 1000 linhas;
+    - Sem limite, exporta até max_rows (padrão 10000).
+    A busca é feita em lotes para não estourar a memória com resultados grandes.
+    """
     try:
         import openpyxl
         from openpyxl.cell import WriteOnlyCell
@@ -694,8 +779,10 @@ def generate_excel_file(filters, max_rows=10000):
             "e reinicie o servidor. A exportação em CSV continua disponível."
         ) from e
 
-    res = search_empresas(filters, page=1, page_size=max_rows)
-    items = res.get("results", [])
+    filters = filters or {}
+    total_alvo = _resolve_total_exportacao(filters, max_rows=max_rows)
+    where_sql, params_base = _build_where_sql(filters)
+    order_sql = resolve_ordenacao(filters.get("ordenar_por", ""))
 
     wb = openpyxl.Workbook(write_only=True)
     ws = wb.create_sheet(title="Empresas RFB")
@@ -725,19 +812,12 @@ def generate_excel_file(filters, max_rows=10000):
     for col, width in col_widths.items():
         ws.column_dimensions[col].width = width
 
-    headers = [
-        "CNPJ", "Razão Social", "Nome Fantasia", "Tipo", "Situação Cadastral",
-        "Data Situação", "Data Início", "CNAE Código", "CNAE Descrição",
-        "UF", "Município", "Porte", "Capital Social", "Natureza Jurídica",
-        "Simples Nacional", "MEI", "Endereço", "Telefone", "E-mail"
-    ]
-
     header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="18181B", end_color="18181B", fill_type="solid")
     header_align = Alignment(horizontal="center", vertical="center")
 
     header_row = []
-    for h in headers:
+    for h in EXPORT_HEADERS:
         c = WriteOnlyCell(ws, value=h)
         c.font = header_font
         c.fill = header_fill
@@ -745,28 +825,38 @@ def generate_excel_file(filters, max_rows=10000):
         header_row.append(c)
     ws.append(header_row)
 
-    for item in items:
-        ws.append([
-            item.get("cnpj", ""),
-            item.get("razao_social", ""),
-            item.get("nome_fantasia", ""),
-            item.get("tipo", ""),
-            item.get("situacao_cadastral", ""),
-            item.get("data_situacao", ""),
-            item.get("data_inicio", ""),
-            item.get("cnae_codigo", ""),
-            item.get("cnae_descricao", ""),
-            item.get("uf", ""),
-            item.get("municipio", ""),
-            item.get("porte", ""),
-            item.get("capital_social", ""),
-            item.get("natureza_juridica", ""),
-            item.get("simples", ""),
-            item.get("mei", ""),
-            item.get("endereco_resumo", ""),
-            item.get("telefone", ""),
-            item.get("email", ""),
-        ])
+    conn = None
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            exportados = 0
+            offset = 0
+            while exportados < total_alvo:
+                lote = min(EXPORT_BATCH_SIZE, total_alvo - exportados)
+                cur.execute(
+                    f"""
+                    SELECT {EXPORT_SELECT_COLS}
+                    FROM "estabelecimento" est
+                    INNER JOIN "empresa" emp ON emp.cnpj_basico = est.cnpj_basico
+                    LEFT JOIN "simples" sim ON sim.cnpj_basico = est.cnpj_basico
+                    {where_sql}
+                    ORDER BY {order_sql}
+                    LIMIT %s OFFSET %s;
+                    """,
+                    params_base + [lote, offset],
+                )
+                rows = cur.fetchall()
+                if not rows:
+                    break
+                for r in rows:
+                    ws.append(_item_para_linha_export(_format_export_row(r)))
+                exportados += len(rows)
+                offset += len(rows)
+                if len(rows) < lote:
+                    break
+    finally:
+        if conn:
+            release_connection(conn)
 
     output = io.BytesIO()
     wb.save(output)
@@ -775,8 +865,10 @@ def generate_excel_file(filters, max_rows=10000):
 
 def get_rfb_metadata():
     """Retorna metadados da base RFB atualmente carregada no banco (_metadados_rfb)."""
+    conn = None
     try:
-        with get_db_cursor() as cur:
+        conn = get_connection()
+        with conn.cursor() as cur:
             cur.execute("""
                 SELECT "ano_mes", "status", "concluido_em", "total_empresas", "total_estabelecimentos", "total_socios"
                 FROM "_metadados_rfb"
@@ -796,6 +888,9 @@ def get_rfb_metadata():
                 }
     except Exception:
         pass
+    finally:
+        if conn:
+            release_connection(conn)
     return None
 
 # Inicializa pool e caches na importação
