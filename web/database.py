@@ -9,6 +9,7 @@ import csv
 import io
 import os
 import pathlib
+import unicodedata
 import psycopg2
 from psycopg2 import pool
 from dotenv import load_dotenv
@@ -208,6 +209,20 @@ def resolve_limite(valor, maximo=LIMITE_MAXIMO):
         return None
     return min(numero, maximo)
 
+def _normalizar_nome_municipio(texto):
+    """Normaliza nome de município para comparação insensível a acentos/caixa/espaços.
+
+    A base RFB grava os nomes em maiúsculas e sem acento ("SAO PAULO"), enquanto o
+    usuário costuma digitar "São Paulo". Sem normalização o filtro não encontra o
+    código e (no comportamento antigo) era silenciosamente ignorado, trazendo
+    resultados de outras cidades.
+    """
+    if texto is None:
+        return ""
+    s = unicodedata.normalize("NFD", str(texto))
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return " ".join(s.lower().strip().split())
+
 def _build_where_sql(filters):
     """Monta o WHERE parametrizado compartilhado entre busca paginada e exportações.
 
@@ -249,18 +264,58 @@ def _build_where_sql(filters):
         where_clauses.append("est.uf = %s")
         params.append(uf)
 
-    # 5. Município
+    # 5. Município (código IBGE ou nome da cidade).
+    # Regra importante: se o usuário digitou algo, o filtro SEMPRE deve restringir a
+    # consulta. O comportamento antigo ignorava silenciosamente o filtro quando o nome
+    # não era encontrado no cache (ex: "São Paulo" com acento vs "SAO PAULO" na base),
+    # retornando resultados de outras cidades.
+    # O "::text" mantém o filtro funcionando tanto no schema do ETL (coluna INTEGER)
+    # quanto no DDL (VARCHAR).
     municipio = (filters.get("municipio", "") or "").strip()
     if municipio:
         if municipio.isdigit():
-            where_clauses.append("est.municipio = %s")
-            params.append(int(municipio))
+            where_clauses.append("est.municipio::text = %s")
+            params.append(str(int(municipio)))
         else:
-            # Tenta localizar código no cache de municípios
-            codigos = [k for k, v in CACHE_DOMINIOS["munic"].items() if municipio.lower() in v.lower()]
-            if codigos:
-                where_clauses.append("est.municipio = ANY(%s)")
-                params.append([int(c) for c in codigos[:50] if c.isdigit()])
+            nome_norm = _normalizar_nome_municipio(municipio)
+            codigos = []
+            try:
+                cache_munic = CACHE_DOMINIOS.get("munic") or {}
+                # 1º: casamento exato insensível a acentos/caixa ("Santos" não traz
+                # "Santos Dumont"; "São Paulo" encontra "SAO PAULO").
+                exatos = [
+                    k for k, v in cache_munic.items()
+                    if _normalizar_nome_municipio(v) == nome_norm
+                ]
+                if exatos:
+                    codigos = exatos
+                elif nome_norm:
+                    # 2º: busca parcial, ainda insensível a acentos.
+                    codigos = [
+                        k for k, v in cache_munic.items()
+                        if nome_norm in _normalizar_nome_municipio(v)
+                    ]
+            except Exception:
+                codigos = []
+            codigos = [str(c) for c in codigos if str(c).isdigit()]
+            if codigos and len(codigos) <= 500:
+                where_clauses.append("est.municipio::text = ANY(%s)")
+                params.append(codigos)
+            else:
+                # Fallback direto na tabela de domínio: funciona mesmo com o cache
+                # vazio ou desatualizado. Testa o texto original e a versão sem
+                # acento, pois a base RFB grava "SAO PAULO" (sem acento, maiúsculas).
+                # Se o nome não existir, a subconsulta retorna vazio (0 resultados)
+                # em vez de ignorar o filtro e trazer outras cidades.
+                # Se houver matches demais no cache (>500), a subconsulta também
+                # evita truncar arbitrariamente a lista de códigos.
+                where_clauses.append(
+                    "(est.municipio::text IN ("
+                    'SELECT "codigo"::text FROM "munic" '
+                    'WHERE "descricao" ILIKE %s OR "descricao" ILIKE %s'
+                    "))"
+                )
+                params.extend([f"%{municipio}%", f"%{nome_norm}%"])
 
     # 6. Situação Cadastral
     situacao = (filters.get("situacao_cadastral", "") or "").strip()
