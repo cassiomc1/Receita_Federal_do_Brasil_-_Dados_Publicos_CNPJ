@@ -76,6 +76,65 @@
                 </button>
             </div>
 
+            <!-- Caixa de Busca Inteligente com TypeSafe AI -->
+            <div class="rounded-xl border border-indigo-100 bg-gradient-to-r from-indigo-50/60 via-zinc-50 to-purple-50/40 p-3.5 space-y-2.5 shadow-xs">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="inline-flex items-center justify-center p-1 rounded-md bg-indigo-600 text-white shadow-xs">
+                            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                        </span>
+                        <span class="text-xs font-semibold text-zinc-900">Busca Inteligente com TypeSafe AI</span>
+                        <span class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-100 text-indigo-700">
+                            System One &bull; Jev
+                        </span>
+                    </div>
+                    <span id="ai-status-indicator" class="text-[11px] text-zinc-500 flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-zinc-400"></span> Verificando IA...
+                    </span>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <div class="relative flex-1">
+                        <input type="text" id="ai-search-prompt"
+                            placeholder="Digite em linguagem natural: ex: 'Pizzarias e restaurantes ativos em Campinas no Simples Nacional com capital acima de 100k'"
+                            class="h-9 w-full rounded-md border border-zinc-200 bg-white pl-3 pr-8 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-indigo-600">
+                        <button id="btn-clear-ai" type="button" class="hidden absolute right-2 top-2 text-zinc-400 hover:text-zinc-600 p-0.5">
+                            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                    <button id="btn-ai-search" type="button"
+                        class="h-9 px-4 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors shadow-sm shrink-0">
+                        <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                        <span id="btn-ai-search-text">Interpretar com IA</span>
+                    </button>
+                </div>
+
+                <!-- Feedback da Interpretação com IA -->
+                <div id="ai-interpretation-box" class="hidden text-xs rounded-lg bg-white/90 border border-indigo-100 p-2.5 space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <span class="font-medium text-indigo-900 flex items-center gap-1.5 text-[11px]">
+                            <i data-lucide="check-circle-2" class="w-3.5 h-3.5 text-indigo-600"></i>
+                            Filtros interpretados:
+                        </span>
+                        <span id="ai-confidence-badge" class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            Confiança: 98%
+                        </span>
+                    </div>
+                    <p id="ai-explanation-text" class="text-zinc-600 text-[11px] leading-relaxed"></p>
+                </div>
+
+                <!-- Alerta de Chave Não Configurada -->
+                <div id="ai-missing-key-alert" class="hidden text-xs rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-amber-800 flex items-start gap-2">
+                    <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-600 shrink-0 mt-0.5"></i>
+                    <div>
+                        <p class="font-semibold text-[11px]">Chave TYPESAFE_API_KEY não configurada</p>
+                        <p class="text-[11px] text-amber-700 mt-0.5">
+                            Adicione sua chave no arquivo <code class="bg-amber-100/70 px-1 py-0.5 rounded">.env</code> para habilitar a busca inteligente e o diagnóstico cadastral com IA. Obtenha em <a href="https://console.typesafe.ai/" target="_blank" class="underline font-medium hover:text-amber-900">console.typesafe.ai</a>.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
             <form id="filter-form" class="space-y-4">
                 <!-- Linha 1: Campos Primários -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -360,6 +419,79 @@
 
             <!-- Modal Body com Scroll Interno -->
             <div class="p-6 overflow-y-auto space-y-6 text-xs text-zinc-700">
+                <!-- Diagnóstico Cadastral & Risco com TypeSafe AI -->
+                <div class="rounded-xl border border-indigo-100 bg-gradient-to-r from-indigo-50/40 via-white to-purple-50/30 p-4 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="p-1 rounded-md bg-indigo-600 text-white shadow-xs">
+                                <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+                            </span>
+                            <div>
+                                <h4 class="text-xs font-semibold text-zinc-900 leading-tight">Diagnóstico Cadastral & Risco (TypeSafe AI)</h4>
+                                <p class="text-[10px] text-zinc-500">Avaliação semântica de coerência de dados, conformidade e governança</p>
+                            </div>
+                        </div>
+                        <button id="btn-run-ai-diagnosis" type="button"
+                            class="h-7 px-3 rounded-md bg-white border border-indigo-200 hover:bg-indigo-50 text-indigo-700 text-xs font-medium flex items-center gap-1.5 transition-colors shadow-xs">
+                            <i data-lucide="sparkles" class="w-3 h-3 text-indigo-600"></i>
+                            <span id="btn-run-ai-diagnosis-text">Executar Diagnóstico com IA</span>
+                        </button>
+                    </div>
+
+                    <!-- Estado Inicial do Diagnóstico -->
+                    <div id="ai-diagnosis-placeholder" class="text-center py-2 text-[11px] text-zinc-400">
+                        Clique em "Executar Diagnóstico com IA" para analisar a ficha cadastral da empresa com TypeSafe AI.
+                    </div>
+
+                    <!-- Loading Spinner do Diagnóstico -->
+                    <div id="ai-diagnosis-loading" class="hidden text-center py-3 space-y-2">
+                        <div class="inline-flex items-center gap-2 text-xs text-indigo-600 font-medium">
+                            <svg class="animate-spin h-4 w-4 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                            <span>Analisando consistência cadastral com modelo System One...</span>
+                        </div>
+                    </div>
+
+                    <!-- Resultado do Diagnóstico -->
+                    <div id="ai-diagnosis-result" class="hidden space-y-3">
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                            <div class="bg-white border border-zinc-200/80 rounded-lg p-2.5">
+                                <span class="text-[10px] text-zinc-400 block font-medium">Risco Cadastral</span>
+                                <span id="diag-badge-risco" class="inline-flex items-center px-2 py-0.5 mt-1 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                    Baixo
+                                </span>
+                            </div>
+                            <div class="bg-white border border-zinc-200/80 rounded-lg p-2.5">
+                                <span class="text-[10px] text-zinc-400 block font-medium">Perfil Operacional</span>
+                                <span id="diag-perfil" class="font-semibold text-xs text-zinc-800 block mt-1">-</span>
+                            </div>
+                            <div class="bg-white border border-zinc-200/80 rounded-lg p-2.5">
+                                <span class="text-[10px] text-zinc-400 block font-medium">Governança / QSA</span>
+                                <span id="diag-societario" class="font-semibold text-xs text-zinc-800 block mt-1">-</span>
+                            </div>
+                            <div class="bg-white border border-zinc-200/80 rounded-lg p-2.5">
+                                <span class="text-[10px] text-zinc-400 block font-medium">Índice de Confiança</span>
+                                <span id="diag-confianca" class="font-semibold text-xs text-indigo-700 block mt-1">-</span>
+                            </div>
+                        </div>
+
+                        <div class="bg-white/80 border border-indigo-50 rounded-lg p-3 space-y-1.5">
+                            <span class="text-[11px] font-medium text-zinc-700 flex items-center gap-1.5">
+                                <i data-lucide="check-square" class="w-3.5 h-3.5 text-indigo-600"></i>
+                                Observações do Modelo:
+                            </span>
+                            <ul id="diag-observacoes" class="list-disc list-inside text-[11px] text-zinc-600 space-y-0.5 leading-relaxed">
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Alerta de Erro / Chave Ausente no Modal -->
+                    <div id="ai-diagnosis-error" class="hidden text-[11px] rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-amber-800">
+                    </div>
+                </div>
+
                 <!-- Seção 1: Informações Gerais -->
                 <div>
                     <h4 class="text-xs font-semibold text-zinc-900 uppercase tracking-wider mb-3 pb-1 border-b border-zinc-100 flex items-center gap-2">
@@ -739,10 +871,23 @@
             }
         }
 
+        // Variáveis de controle de IA e Modal
+        let currentModalCnpjBasico = null;
+        let aiConfigured = false;
+
         // Modal de Ficha Cadastral da Empresa
         async function openCompanyModal(cnpjBasico) {
+            currentModalCnpjBasico = cnpjBasico;
             const modal = document.getElementById('company-modal');
             modal.classList.remove('hidden');
+
+            // Reseta card de diagnóstico com IA
+            document.getElementById('ai-diagnosis-placeholder').classList.remove('hidden');
+            document.getElementById('ai-diagnosis-loading').classList.add('hidden');
+            document.getElementById('ai-diagnosis-result').classList.add('hidden');
+            document.getElementById('ai-diagnosis-error').classList.add('hidden');
+            document.getElementById('btn-run-ai-diagnosis').disabled = false;
+            document.getElementById('btn-run-ai-diagnosis-text').innerText = 'Executar Diagnóstico com IA';
 
             try {
                 const res = await fetch(`/api/empresa/${cnpjBasico}`);
@@ -792,12 +937,227 @@
             }
         }
 
+        // Executa diagnóstico cadastral semântico com TypeSafe AI
+        async function runAiDiagnosis() {
+            if (!currentModalCnpjBasico) return;
+
+            const btn = document.getElementById('btn-run-ai-diagnosis');
+            const btnText = document.getElementById('btn-run-ai-diagnosis-text');
+            const placeholder = document.getElementById('ai-diagnosis-placeholder');
+            const loading = document.getElementById('ai-diagnosis-loading');
+            const result = document.getElementById('ai-diagnosis-result');
+            const errorBox = document.getElementById('ai-diagnosis-error');
+
+            placeholder.classList.add('hidden');
+            errorBox.classList.add('hidden');
+            result.classList.add('hidden');
+            loading.classList.remove('hidden');
+            btn.disabled = true;
+            btnText.innerText = 'Analisando...';
+
+            try {
+                const res = await fetch(`/api/ai/empresa/${currentModalCnpjBasico}/diagnostico`);
+                const data = await res.json();
+                loading.classList.add('hidden');
+
+                if (!res.ok) {
+                    errorBox.innerHTML = `
+                        <p class="font-semibold text-[11px]">${data.error || 'Erro ao executar diagnóstico com TypeSafe AI.'}</p>
+                        ${data.help ? `<p class="mt-0.5 text-amber-700">${data.help}</p>` : ''}
+                    `;
+                    errorBox.classList.remove('hidden');
+                    btn.disabled = false;
+                    btnText.innerText = 'Tentar Novamente';
+                    return;
+                }
+
+                const badgeRisco = document.getElementById('diag-badge-risco');
+                badgeRisco.innerText = data.nivel_risco;
+                if (data.cor_risco === 'emerald') {
+                    badgeRisco.className = 'inline-flex items-center px-2 py-0.5 mt-1 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200';
+                } else if (data.cor_risco === 'amber') {
+                    badgeRisco.className = 'inline-flex items-center px-2 py-0.5 mt-1 rounded text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200';
+                } else {
+                    badgeRisco.className = 'inline-flex items-center px-2 py-0.5 mt-1 rounded text-xs font-semibold bg-red-50 text-red-700 border border-red-200';
+                }
+
+                document.getElementById('diag-perfil').innerText = data.perfil_operacional || '-';
+                document.getElementById('diag-societario').innerText = data.complexidade_societaria || '-';
+                document.getElementById('diag-confianca').innerText = `${Math.round((data.confianca_analise || 0.9) * 100)}%`;
+
+                const obsList = document.getElementById('diag-observacoes');
+                obsList.innerHTML = '';
+                (data.observacoes || []).forEach(obs => {
+                    const li = document.createElement('li');
+                    li.innerText = obs;
+                    obsList.appendChild(li);
+                });
+
+                result.classList.remove('hidden');
+                btn.disabled = false;
+                btnText.innerText = 'Atualizar Diagnóstico';
+                lucide.createIcons();
+            } catch (err) {
+                console.error('Erro no diagnóstico IA:', err);
+                loading.classList.add('hidden');
+                errorBox.innerText = 'Falha ao conectar com o serviço de IA: ' + err.message;
+                errorBox.classList.remove('hidden');
+                btn.disabled = false;
+                btnText.innerText = 'Tentar Novamente';
+            }
+        }
+
+        // Checa status do TypeSafe AI
+        async function checkAiStatus() {
+            try {
+                const res = await fetch('/api/ai/status');
+                if (res.ok) {
+                    const data = await res.json();
+                    aiConfigured = Boolean(data.configured);
+                    const indicator = document.getElementById('ai-status-indicator');
+                    if (aiConfigured) {
+                        indicator.innerHTML = `
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <span class="text-emerald-700 font-medium">TypeSafe AI Ativo</span>
+                        `;
+                    } else {
+                        indicator.innerHTML = `
+                            <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                            <span class="text-amber-700">Chave .env ausente</span>
+                        `;
+                    }
+                }
+            } catch (err) {
+                console.warn('Não foi possível verificar status da IA:', err);
+            }
+        }
+
+        // Executa busca em linguagem natural interpretada pelo TypeSafe AI
+        async function executeAiSearch() {
+            const promptInput = document.getElementById('ai-search-prompt');
+            const prompt = promptInput.value.trim();
+            if (!prompt) return;
+
+            const btn = document.getElementById('btn-ai-search');
+            const btnText = document.getElementById('btn-ai-search-text');
+            const interpBox = document.getElementById('ai-interpretation-box');
+            const missingAlert = document.getElementById('ai-missing-key-alert');
+            const explanationText = document.getElementById('ai-explanation-text');
+            const confidenceBadge = document.getElementById('ai-confidence-badge');
+
+            interpBox.classList.add('hidden');
+            missingAlert.classList.add('hidden');
+            btn.disabled = true;
+            btnText.innerText = 'Interpretando...';
+
+            try {
+                const res = await fetch('/api/ai/consulta-inteligente', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: prompt }),
+                });
+
+                const data = await res.json();
+                btn.disabled = false;
+                btnText.innerText = 'Interpretar com IA';
+
+                if (!res.ok) {
+                    if (data.not_configured) {
+                        missingAlert.classList.remove('hidden');
+                    } else {
+                        alert(data.error || 'Erro ao interpretar busca com IA.');
+                    }
+                    return;
+                }
+
+                // Aplica filtros aos campos da tela
+                const f = data.filters || {};
+                let camposAlterados = [];
+
+                function setAndHighlight(id, val) {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    el.value = val;
+                    el.classList.add('ring-2', 'ring-indigo-500', 'bg-indigo-50/30');
+                    setTimeout(() => {
+                        el.classList.remove('ring-2', 'ring-indigo-500', 'bg-indigo-50/30');
+                    }, 3000);
+                    camposAlterados.push(id);
+                }
+
+                if (f.uf) setAndHighlight('f-uf', f.uf);
+                if (f.municipio) setAndHighlight('f-municipio', f.municipio);
+                if (f.situacao_cadastral) setAndHighlight('f-situacao', f.situacao_cadastral);
+                if (f.porte_empresa) setAndHighlight('f-porte', f.porte_empresa);
+                if (f.opcao_simples) setAndHighlight('f-simples', f.opcao_simples);
+                if (f.opcao_mei) setAndHighlight('f-mei', f.opcao_mei);
+                if (f.matriz_filial) setAndHighlight('f-matriz-filial', f.matriz_filial);
+                if (f.capital_min) setAndHighlight('f-cap-min', f.capital_min);
+                if (f.cnae) setAndHighlight('f-cnae', f.cnae);
+                if (f.data_inicio_de) {
+                    const raw = f.data_inicio_de;
+                    if (raw.length === 8) {
+                        setAndHighlight('f-dt-ini', `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`);
+                    }
+                }
+
+                // Abre filtros avançados caso algum campo dele tenha sido preenchido
+                const advancedIds = ['f-porte', 'f-simples', 'f-mei', 'f-cap-min', 'f-dt-ini'];
+                if (advancedIds.some(id => camposAlterados.includes(id))) {
+                    const adv = document.getElementById('advanced-filters');
+                    if (adv.classList.contains('hidden')) {
+                        adv.classList.remove('hidden');
+                        document.getElementById('advanced-chevron').classList.add('rotate-180');
+                    }
+                }
+
+                explanationText.innerText = data.explanation || 'Parâmetros interpretados com sucesso.';
+                confidenceBadge.innerText = `Confiança: ${Math.round((data.confidence || 0.95) * 100)}%`;
+                interpBox.classList.remove('hidden');
+                document.getElementById('btn-clear-ai').classList.remove('hidden');
+
+                lucide.createIcons();
+
+                // Dispara a consulta com os filtros preenchidos
+                fetchEmpresas(1);
+            } catch (err) {
+                console.error('Erro na consulta com IA:', err);
+                btn.disabled = false;
+                btnText.innerText = 'Interpretar com IA';
+                alert('Falha ao comunicar com o servidor: ' + err.message);
+            }
+        }
+
+        // Limpa busca com IA
+        function clearAiSearch() {
+            document.getElementById('ai-search-prompt').value = '';
+            document.getElementById('btn-clear-ai').classList.add('hidden');
+            document.getElementById('ai-interpretation-box').classList.add('hidden');
+            document.getElementById('ai-missing-key-alert').classList.add('hidden');
+        }
+
         function closeModal() {
             document.getElementById('company-modal').classList.add('hidden');
         }
 
         document.getElementById('btn-close-modal').addEventListener('click', closeModal);
         document.getElementById('btn-close-modal-footer').addEventListener('click', closeModal);
+        document.getElementById('btn-run-ai-diagnosis').addEventListener('click', runAiDiagnosis);
+        document.getElementById('btn-ai-search').addEventListener('click', executeAiSearch);
+        document.getElementById('btn-clear-ai').addEventListener('click', clearAiSearch);
+        document.getElementById('ai-search-prompt').addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                executeAiSearch();
+            }
+        });
+        document.getElementById('ai-search-prompt').addEventListener('input', e => {
+            if (e.target.value.trim()) {
+                document.getElementById('btn-clear-ai').classList.remove('hidden');
+            } else {
+                document.getElementById('btn-clear-ai').classList.add('hidden');
+            }
+        });
 
         // Exportação para CSV
         const btnExportarCsv = document.getElementById('btn-exportar');
@@ -915,6 +1275,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             loadDomains();
             loadStatusAndVersion();
+            checkAiStatus();
             limparResultados();
         });
     </script>
