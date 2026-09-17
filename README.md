@@ -88,7 +88,41 @@ O repositório inclui uma interface web moderna, rápida e minimalista baseada n
 - **Paginação Server-Side:** Paginação otimizada com seletor de itens por página (10, 25, 50, 100) e cálculo total de registros e páginas.
 - **Detalhes da Empresa:** Modal completo com abas detalhando Matriz, Endereço e Contato, Enquadramento Tributário, Quadro de Sócios e Administradores (QSA) e Filiais cadastradas.
 - **Exportação para CSV e XLS (Excel):** Exportação direta dos resultados filtrados para planilha Excel (.xlsx / .xls) com estilização de cabeçalho, larguras de colunas ajustadas e preservação de formatação de CNPJs e códigos, além de exportação em streaming CSV delimitado por `;` com codificação UTF-8 BOM.
+- **Busca Inteligente com TypeSafe AI:** Caixa de busca em linguagem natural que traduz intenções livres (ex: *"pizzarias e restaurantes em Campinas abertos no Simples com capital acima de 100k"*) em filtros determinísticos no banco de dados.
+- **Diagnóstico Cadastral & Risco com IA:** Análise semântica no modal de detalhes da empresa avaliando consistência de capital x porte, alinhamento entre nome e atividade econômica e complexidade da governança societária.
 - **Liberação Automática de Firewall (Oracle Linux 9 / RHEL / OCI):** O script verifica se o `firewalld` ou `iptables` está ativo no servidor e adiciona automaticamente a porta utilizada nas regras para liberar o tráfego externo de forma permanente.
+
+---------------------
+
+### Inteligência Artificial com TypeSafe AI (System One / Jev)
+
+A aplicação integra o **TypeSafe AI**, utilizando modelos de decisão *System One* (como o **Jev**) que retornam julgamentos rápidos, tipados e calibrados probabilisticamente (`Choice`, `Score` e `Noul`), em vez de texto livre ou alucinações de SQL.
+
+> [!IMPORTANT]
+> **Necessário Adicionar Sua Própria Chave de API:**
+> Para utilizar os recursos de Inteligência Artificial (busca em linguagem natural e diagnóstico cadastral), **é obrigatório obter e adicionar sua própria chave de API** no arquivo `.env`. Nenhuma chave é fornecida por padrão no repositório por razões de segurança.
+> 
+> 1. Obtenha sua chave gratuita ou corporativa em: **[console.typesafe.ai](https://console.typesafe.ai/)**
+> 2. Adicione a variável `TYPESAFE_API_KEY` no seu arquivo `.env`:
+>    ```env
+>    TYPESAFE_API_KEY=ts_live_suachaveaqui
+>    ```
+> *(Caso a chave não seja configurada, a aplicação continua funcionando normalmente para consultas manuais e exportações, exibindo alertas orientando a configuração).*
+
+#### Recursos Habilitados pelo TypeSafe AI:
+1. **Busca Semântica para Filtros Estruturados (*Intent Routing*):**
+   - O usuário digita qualquer termo em linguagem natural.
+   - O TypeSafe avalia escolhas contra conjuntos fechados e tipados (UFs, Portes, Situação Cadastral, Optante Simples/MEI, Matriz/Filial, Faixa de Capital e Atividade/CNAE).
+   - Os filtros correspondentes são preenchidos automaticamente na tela e a consulta é executada sem risco de injeção ou erros de sintaxe SQL.
+2. **Diagnóstico Cadastral & Due Diligence (KYC):**
+   - No modal de detalhes da empresa, avalia atomicamente a coerência cadastral:
+     - Discrepância de Capital Social em relação ao porte ou atividade descrita.
+     - Conflito entre a Razão Social/Nome Fantasia e o CNAE fiscal principal.
+     - Nível de complexidade da composição societária (Simples, Moderada, Complexa).
+     - Perfil operacional predominante (B2B Corporativo, B2C Varejo, Indústria, Holding, etc.).
+     - Classificação final de risco (Baixo, Moderado, Atenção) com índice de confiança calibrado.
+
+---------------------
 
 #### Como Iniciar:
 
@@ -147,6 +181,7 @@ Ao iniciar, as credenciais de acesso serão exibidas no terminal:
    - `DB_HOST`: host do banco (ex: `localhost`)
    - `DB_PORT`: porta do banco (ex: `5432`)
    - `DB_NAME`: nome da base de dados (`Dados_RFB`)
+   - `TYPESAFE_API_KEY`: *(Obrigatório para recursos de IA)* sua chave de API pessoal obtida no [console.typesafe.ai](https://console.typesafe.ai/)
    - *(Opcional)* `RFB_ANO_MES`: especifique um mês/ano fixo (ex: `2026-08`). Se omitido, o script detecta e baixa automaticamente a base mais recente disponível.
 
 4. **Executar o processo de ETL:**

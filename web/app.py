@@ -46,6 +46,12 @@ try:
         DB_NAME,
         DB_HOST,
     )
+    from web.ai_service import (
+        is_ai_configured,
+        parse_natural_language_query,
+        diagnosticar_empresa_cadastral,
+        TypeSafeNotConfiguredError,
+    )
 except ImportError:
     from auth import (
         APP_SECRET_KEY,
@@ -74,6 +80,12 @@ except ImportError:
         get_rfb_metadata,
         DB_NAME,
         DB_HOST,
+    )
+    from ai_service import (
+        is_ai_configured,
+        parse_natural_language_query,
+        diagnosticar_empresa_cadastral,
+        TypeSafeNotConfiguredError,
     )
 
 app = Flask(__name__)
@@ -205,6 +217,66 @@ def api_empresa_detalhes(cnpj_basico):
     if not detalhes:
         return jsonify({"error": "Empresa não encontrada"}), 404
     return jsonify(detalhes)
+
+# --------------------------------------------------------------------------------------------------
+# Endpoints de Inteligência Artificial (TypeSafe AI - System One / Jev)
+# --------------------------------------------------------------------------------------------------
+@app.route("/api/ai/status", methods=["GET"])
+@login_required
+def api_ai_status():
+    """Informa se o TypeSafe AI está configurado e pronto para uso."""
+    configurado = is_ai_configured()
+    return jsonify({
+        "configured": configurado,
+        "model": "TypeSafe System One (Jev)",
+        "message": (
+            "TypeSafe AI ativo e pronto para uso."
+            if configurado
+            else "Chave TYPESAFE_API_KEY não configurada no arquivo .env."
+        ),
+    })
+
+@app.route("/api/ai/consulta-inteligente", methods=["POST"])
+@login_required
+def api_ai_consulta_inteligente():
+    """Interpreta busca em linguagem natural e retorna os filtros correspondentes."""
+    payload = request.get_json(silent=True) or {}
+    prompt = payload.get("prompt", "").strip()
+
+    if not prompt:
+        return jsonify({"error": "Informe o texto da pesquisa para interpretação com IA."}), 400
+
+    try:
+        resultado = parse_natural_language_query(prompt)
+        return jsonify(resultado)
+    except TypeSafeNotConfiguredError as e:
+        return jsonify({
+            "error": str(e),
+            "not_configured": True,
+            "help": "Configure TYPESAFE_API_KEY no arquivo .env para habilitar a busca inteligente.",
+        }), 400
+    except Exception as e:
+        return jsonify({"error": f"Erro ao processar consulta com TypeSafe AI: {str(e)}"}), 500
+
+@app.route("/api/ai/empresa/<cnpj_basico>/diagnostico", methods=["GET"])
+@login_required
+def api_ai_empresa_diagnostico(cnpj_basico):
+    """Executa diagnóstico semântico de conformidade cadastral e risco com TypeSafe AI."""
+    detalhes = get_empresa_details(cnpj_basico)
+    if not detalhes:
+        return jsonify({"error": "Empresa não encontrada"}), 404
+
+    try:
+        diagnostico = diagnosticar_empresa_cadastral(detalhes)
+        return jsonify(diagnostico)
+    except TypeSafeNotConfiguredError as e:
+        return jsonify({
+            "error": str(e),
+            "not_configured": True,
+            "help": "Configure TYPESAFE_API_KEY no arquivo .env para habilitar o diagnóstico cadastral.",
+        }), 400
+    except Exception as e:
+        return jsonify({"error": f"Erro ao gerar diagnóstico cadastral: {str(e)}"}), 500
 
 @app.route("/api/exportar-csv", methods=["GET"])
 @login_required
