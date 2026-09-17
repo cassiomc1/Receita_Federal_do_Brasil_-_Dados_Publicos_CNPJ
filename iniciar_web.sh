@@ -173,7 +173,7 @@ fi
 # Módulos exigidos pelo servidor web (sem eles a aplicação não inicia)
 DEPS_OBRIGATORIAS="flask psycopg2 dotenv"
 # Módulos opcionais: a ausência não impede o servidor de subir, apenas desabilita um recurso
-DEPS_OPCIONAIS="openpyxl requests"
+DEPS_OPCIONAIS="openpyxl requests typesafe_sdk"
 
 # Imprime os módulos ausentes dentre os nomes informados (vazio se todos estiverem instalados).
 # Se o interpretador não puder ser executado, considera todos ausentes em vez de abortar o script.
