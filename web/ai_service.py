@@ -384,9 +384,17 @@ def diagnosticar_empresa_cadastral(empresa_detalhes: dict) -> dict:
 
     prob_anomalia_capital = response.nouls["anomalia_capital"].noul
     prob_conflito_nome = response.nouls["conflito_nome_atividade"].noul
-    score_societario = response.scores["complexidade_societaria"].score
-    perfil_escolhido = response.choices["perfil_operacional"].choice
-    confianca_perfil = response.choices["perfil_operacional"].confidence
+    score_val = response.scores["complexidade_societaria"].score
+    try:
+        score_num = float(score_val)
+        idx = min(max(round(score_num), 0), 2)
+        nomes_complexidade = ["Simples", "Moderada", "Complexa"]
+        descricao_complexidade = nomes_complexidade[idx]
+    except Exception:
+        descricao_complexidade = str(score_val)
+
+    perfil_escolhido = str(response.choices["perfil_operacional"].choice or "outros")
+    confianca_perfil = float(response.choices["perfil_operacional"].confidence or 0.95)
 
     # Cálculo da classificação de risco cadastral em código
     if prob_anomalia_capital > 0.7 or prob_conflito_nome > 0.7:
@@ -421,14 +429,14 @@ def diagnosticar_empresa_cadastral(empresa_detalhes: dict) -> dict:
     else:
         observacoes.append("Nome empresarial condizente com as atividades econômicas informadas.")
 
-    observacoes.append(f"Estrutura societária avaliada como {score_societario.lower()}.")
+    observacoes.append(f"Estrutura societária avaliada como {descricao_complexidade.lower()}.")
 
     return {
         "nivel_risco": nivel_risco,
         "cor_risco": cor_risco,
         "status_resumo": status_resumo,
         "perfil_operacional": mapa_perfil.get(perfil_escolhido, perfil_escolhido),
-        "complexidade_societaria": score_societario,
+        "complexidade_societaria": descricao_complexidade,
         "probabilidade_anomalia_capital": round(prob_anomalia_capital, 2),
         "probabilidade_conflito_nome": round(prob_conflito_nome, 2),
         "confianca_analise": round(confianca_perfil, 2),
